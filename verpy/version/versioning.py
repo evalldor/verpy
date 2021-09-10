@@ -86,7 +86,7 @@ def as_requirement(requirement):
         return requirement
     
     if isinstance(requirement, str):
-        return Requirement(requirement)
+        return Requirement.from_string(requirement)
 
     raise ValueError(f"Invalid requirement type '{type(requirement)}'.")
 
@@ -181,7 +181,7 @@ class Version:
         return compare_versions(self._parsed_repr(), other._parsed_repr()) != 0
 
     def __str__(self):
-        return f"'{self._str_repr()}'"
+        return f"{self._str_repr()}"
 
     def __repr__(self):
         return str(self)
@@ -367,14 +367,8 @@ class VersionSet:
         #This method is implemented in the subclasses.
         raise NotImplementedError()
 
-    def filter_disallowed(self, versions):
+    def filter_allowed(self, versions):
         return list(filter(self.allows_version, [as_version(v) for v in versions]))
-    
-    def __str__(self):
-        return f"'{self._to_str()}'"
-
-    def __repr__(self):
-        return str(self)
 
     @staticmethod
     def from_string(string):
@@ -435,141 +429,214 @@ class NoneSpecifier(VersionSet):
     def allows_version(self, version):
         return False
 
-    def _to_str(self):
+    def __str__(self):
         return "None"
 
+    def __repr__(self):
+        return str(self)
+        
 class AnySpecifier(VersionSet):
 
     def allows_version(self, version):
         return True
 
-    def _to_str(self):
-        return "Any"
+    def __str__(self):
+        return "None"
+
+    def __repr__(self):
+        return str(self)
 
 class EqSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return self.version == version
+        return self.version == as_version(version)
 
-    def _to_str(self):
-        return f"=={self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f"=={str(self.version)}"
+
+    def __repr__(self):
+        return f"=={repr(self.version)}"
 
     def __hash__(self):
         return hash(("==", self.version))
 
 class NotEqSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return self.version != version
+        return self.version != as_version(version)
 
-    def _to_str(self):
-        return f"!={self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f"!={str(self.version)}"
+
+    def __repr__(self):
+        return f"!={repr(self.version)}"
 
     def __hash__(self):
         return hash(("!=", self.version))
 
 class GtEqSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return version >= self.version
+        return as_version(version) >= self.version
 
-    def _to_str(self):
-        return f">={self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f">={str(self.version)}"
+
+    def __repr__(self):
+        return f">={repr(self.version)}"
 
     def __hash__(self):
         return hash((">=", self.version))
 
 class LtEqSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return version <= self.version
+        return as_version(version) <= self.version
 
-    def _to_str(self):
-        return f"<={self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f"<={str(self.version)}"
+
+    def __repr__(self):
+        return f"<={repr(self.version)}"
 
     def __hash__(self):
         return hash(("<=", self.version))
 
 class GtSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return version > self.version
+        return as_version(version) > self.version
 
-    def _to_str(self):
-        return f">{self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f">{str(self.version)}"
+
+    def __repr__(self):
+        return f">{repr(self.version)}"
 
     def __hash__(self):
         return hash((">", self.version))
 
 class LtSpecifier(VersionSet):
 
-    def __init__(self, version):
+    def __init__(self, version, original_string=None):
         self.version = version
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return version < self.version
+        return as_version(version) < self.version
 
-    def _to_str(self):
-        return f"<{self.version._str_repr()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f"<{str(self.version)}"
+
+    def __repr__(self):
+        return f"<{repr(self.version)}"
 
     def __hash__(self):
         return hash(("<", self.version))
 
 class AndOperator(VersionSet):
 
-    def __init__(self, *specifiers):
+    def __init__(self, *specifiers, original_string=None):
         assert len(specifiers) > 0
         self.specifiers = specifiers
+        self.original_string = original_string
 
     def allows_version(self, version):
+        version = as_version(version)
         return all([spec.allows_version(version) for spec in self.specifiers])
 
-    def _to_str(self):
-        return "(" + " & ".join([spec._to_str() for spec in self.specifiers]) + ")"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
         
+        return "(" + " & ".join([str(spec) for spec in self.specifiers]) + ")"
+
+    def __repr__(self):
+        return "(" + " & ".join([repr(spec) for spec in self.specifiers]) + ")"
+
+ 
     def __hash__(self):
         return hash(("&", *self.specifiers))
 
 class OrOperator(VersionSet):
 
-    def __init__(self, *specifiers):
+    def __init__(self, *specifiers, original_string=None):
         assert len(specifiers) > 0
         self.specifiers = specifiers
+        self.original_string = original_string
 
     def allows_version(self, version):
+        version = as_version(version)
         return any([spec.allows_version(version) for spec in self.specifiers])
 
-    def _to_str(self):
-        return "(" + (" | ".join([spec._to_str() for spec in self.specifiers])) + ")"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return "(" + (" | ".join([str(spec) for spec in self.specifiers])) + ")"
 
+    def __repr__(self):
+        return "(" + (" | ".join([repr(spec) for spec in self.specifiers])) + ")"
+
+ 
     def __hash__(self):
         return hash(("|", *self.specifiers))
 
 class NotOperator(VersionSet):
 
-    def __init__(self, specifier):
+    def __init__(self, specifier, original_string=None):
         self.specifier = specifier
+        self.original_string = original_string
 
     def allows_version(self, version):
-        return not self.specifier.allows_version(version)
+        return not self.specifier.allows_version(as_version(version))
 
-    def _to_str(self):
-        return f"!{self.specifier._to_str()}"
+    def __str__(self):
+        if self.original_string is not None:
+            return self.original_string
+        
+        return f"!{str(self.version)}"
+
+    def __repr__(self):
+        return f"!{repr(self.version)}"
 
     def __hash__(self):
         return hash(("!", self.specifier))
@@ -647,15 +714,25 @@ REQUIREMENT = REQUIREMENT_NAME + TERM
 
 class Requirement:
 
-    def __init__(self, requirement_string):
-        self._requirement_string = requirement_string
-        self.name, self.version_set = REQUIREMENT.parseString(requirement_string, parseAll=True)
+    def __init__(self, package_name, version_set, original_string=None):
+        self.package_name = package_name
+        self.version_set = version_set
+        self.original_string = original_string
+
+    @staticmethod
+    def from_string(string):
+        package_name, version_set = REQUIREMENT.parseString(string, parseAll=True)
+
+        return Requirement(package_name, version_set, string)
 
     def __str__(self):
-        return f"'{self._requirement_string}'"
+        if self.original_string is not None:
+            return f"{self.original_string}"
+        
+        return f"{self.package_name} {self.version_set}"
 
     def __repr__(self):
-        return str(self)
+        return f"{self.package_name} {self.version_set}"
 
 #
 # Maven Range parsing

@@ -1,4 +1,4 @@
-import verpy as vp
+import verpy.version as vp
 
 def test_versions():
 
@@ -14,7 +14,7 @@ def test_versions():
     assert hash(vp.version("1.0-SNAPSHOT")) == hash(vp.version("1-SNAPSHOT"))
     
     rng = vp.maven_set("(1.0-SNAPSHOT,], 2.0-alpha-1, (2.0-alpha1, 2.0-alpha-2)")
-    # print(rng)
+    print(rng)
 
 def test_version_sets():
     vset = vp.set(">=1.0")
@@ -45,3 +45,8 @@ def test_version_sets():
 
     vset = vp.set(">= 1.0 | 3.0")
     print(vset)
+
+def test_requiremen():
+
+    req = vp.requirement("verpy >= 1.0 & < 2.0")
+    print(req)
