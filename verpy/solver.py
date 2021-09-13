@@ -347,8 +347,8 @@ def solve_dependencies(book):
         logger.debug(f"\tAvailable versions are: {all_versions}")
 
 
-    allowed_versions = book.get_allowed_versions(package_name)
-    logger.debug(f"\tAllowed versions are: {allowed_versions}")
+        allowed_versions = book.get_allowed_versions(package_name)
+        logger.debug(f"\tAllowed versions are: {allowed_versions}")
         
 
 
