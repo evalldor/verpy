@@ -12,7 +12,7 @@ class Assignment:
         self.version = version
 
     def __str__(self) -> str:
-        return f"{self.package_name} := {self.version}"
+        return f"{self.package_name} {self.version}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -53,6 +53,9 @@ class DependencyConstraint(Constraint):
         
         return False
 
+    def get_assignments(self):
+        return set([self.assignment])
+
     def get_target_package_names(self):
         return [self.requirement.package_name]
 
@@ -74,11 +77,15 @@ class DependencyConstraint(Constraint):
 
 class IncompatibilityConstraint(Constraint):
     
-    def __init__(self, assignments):
+    def __init__(self, assignments, trace_to=None):
         self.assignments = set(assignments)
+        self.trace_to = trace_to
 
     def is_violated_by(self, assignments):
         return self.assignments.issubset(assignments)
+
+    def get_assignments(self):
+        return set(self.assignments)
 
     def get_target_package_names(self):
         return [assignment.package_name for assignment in self.assignments]
@@ -90,6 +97,9 @@ class IncompatibilityConstraint(Constraint):
 
         return False
 
+    def issubset(self, other):
+        return self.assignments.issubset(other.assignments)
+
     def __str__(self) -> str:
         return "Not(" + " & ".join([str(a) for a in self.assignments]) + ")"
 
@@ -97,7 +107,7 @@ class IncompatibilityConstraint(Constraint):
         return str(self)
 
     def __hash__(self):
-        return hash(("IncompatibilityConstraint", *self.assignments))
+        return hash(("IncompatibilityConstraint", *sorted(self.assignments, key=lambda a: hash(a))))
 
     def __eq__(self, o: object) -> bool:
         return hash(self) == hash(o)
@@ -163,6 +173,7 @@ class Book:
     def get_assignments(self):
         return list(self.assignments)
 
+    
 
     #
     # Constraints
@@ -207,6 +218,14 @@ class Book:
         
         return constraints_for_package
 
+    def get_dependants(self, package_name):
+        assignments = []
+        for constraint in self.constraints:
+            if isinstance(constraint, DependencyConstraint) and constraint.is_constraint_on_package(package_name):
+                assignments.append(constraint.assignment)
+        
+        return assignments
+
     def has_dependants(self, package_name):
         for constraint in self.constraints:
             if isinstance(constraint, DependencyConstraint) and constraint.is_constraint_on_package(package_name):
@@ -214,6 +233,20 @@ class Book:
         
         return False
 
+    def violates_any_constraints(self, assignments):
+        for constraint in self.constraints:
+            if constraint.is_violated_by(assignments):
+                return True
+        
+        return False
+
+    def find_earliest_offending_assignment(self):
+        
+        for i in range(1, len(self.assignments)+1):
+            if self.violates_any_constraints(self.assignments[:i]):
+                return self.assignments[i-1]
+        
+        return None
 
     #
     # Frontiers
@@ -280,17 +313,22 @@ def solve_dependencies(root_dependencies, package_repository):
         if len(allowed_versions) == 0:
             logger.debug(f"\tNo allowed versions! Running conflict resolution")
             constraints = book.get_dependency_constraints_for_package(package_name)
+            
+            # incompatibilities = _find_incompatibilities(
+            #     book.get_assignments(), 
+            #     book.get_constraints_for_package(package_name), 
+            #     package_name, 
+            #     book.get_available_versions(package_name)
+            # )
 
-            assignments = []
+            assignments = book.get_dependants(package_name)
 
-            for constraint in constraints:
-                assignments.append(constraint.assignment)
 
             if len(assignments) == 1 and isinstance(assignments[0], RootAssignment):
                 raise Exception("Version solving failed.")
 
             book.add_constraint(IncompatibilityConstraint(assignments))
-
+ 
             # logger.debug(assignments)
             if isinstance(assignments[-1], RootAssignment):
                 # logger.debug(f"Removing assignment {assignments[-2]}")
@@ -315,15 +353,10 @@ def solve_dependencies(root_dependencies, package_repository):
                     [assignment.version]
                 )
 
-                for constraint_set in incompatibilities:
-                    assignments = []
+                for incompatibility in incompatibilities:
+                    incompatibility.assignments.add(assignment)
 
-                    for constraint in constraint_set:
-                        assignments.append(constraint.assignment)
-
-                    assignments.append(assignment)
-
-                    book.add_constraint(IncompatibilityConstraint(assignments))
+                    book.add_constraint(incompatibility)
                 
                 book.remove_assignment(package_name)
                 continue
@@ -345,19 +378,24 @@ def _find_incompatibilities(assignments, constraints, package_name, all_versions
     # Find the requirements that are conflicting with the assignment
     # by going through all possible requirement combinations
     all_combinations = list(itertools.chain(*[itertools.combinations(constraints, i) for i in range(1, len(constraints)+1)]))
-    logger.debug(all_combinations)
 
     incompatibilities = []
 
     for constraint_combination in all_combinations:
         allowed_versions = _filter_allowed_version(assignments, constraint_combination, package_name, all_versions)
-        if len(allowed_versions) == 0 and not _contains_subset(incompatibilities, constraint_combination):
-            incompatibilities.append(set(constraint_combination))
+        if len(allowed_versions) == 0:
+            assignments = []
+            for constraint in constraint_combination:
+                assignments.extend(constraint.get_assignments())
+            
+            incompatibility = IncompatibilityConstraint(assignments, constraint_combination)
+            if not _contains_subset(incompatibilities, incompatibility):
+                incompatibilities.append(incompatibility)
     
-    
+
     logger.debug("Found the following incompatibilities")
     logger.debug(f"\t{incompatibilities}")
-    
+
     return incompatibilities
 
 def _filter_allowed_version(assignments, constraints, package_name, all_versions):
@@ -375,9 +413,9 @@ def _filter_allowed_version(assignments, constraints, package_name, all_versions
 
     return allowed_versions
 
-def _contains_subset(lst, constraints):
-    for item in lst:
-        if item.issubset(constraints):
+def _contains_subset(incompatibilities, incompatibility):
+    for item in incompatibilities:
+        if item.issubset(incompatibility):
             return True
     
     return False
