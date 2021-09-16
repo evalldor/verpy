@@ -5,6 +5,7 @@ import logging
 
 logger = logging.getLogger("solver")
 
+
 class Assignment:
 
     def __init__(self, package_name, version) -> None:

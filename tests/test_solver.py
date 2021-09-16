@@ -1,5 +1,5 @@
 import verpy.version as vp
-import verpy.solver2 as solver
+import verpy.solver3 as solver
 
 import logging
 import pytest
