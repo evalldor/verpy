@@ -1,5 +1,5 @@
 import verpy.version as vp
-import verpy.solver3 as solver
+import verpy.solver4 as solver
 
 import logging
 import pytest
@@ -161,7 +161,7 @@ def test_solver_4():
         ],
         package_repository=repo
     )
-
+    print(result)
     assert len(result) == 3
     assert solver.Assignment("bar", vp.version("2.0")) in result
     assert solver.Assignment("foo", vp.version("1.0")) in result
