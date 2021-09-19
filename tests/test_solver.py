@@ -1,5 +1,5 @@
 import verpy.version as vp
-import verpy.solver4 as solver
+import verpy.solver5 as solver
 
 import logging
 import pytest
@@ -331,3 +331,39 @@ def test_solver_8():
     # assert solver.Assignment("baz", vp.version("1.0")) in result
 
     print(result)
+
+
+def test_solver_9():
+
+    repo = solver.DictRepository({
+        "foo": {
+            "1.0": [
+                "bar 1.0"
+            ]
+        },
+        "bar": {
+            "1.0": [
+                "baz 1.0"
+            ],
+            "2.0": [
+                "baz 1.0"
+            ],
+            "3.0": [
+                "foo 1.0"
+            ]
+        },
+        "baz": {
+            "1.0": []
+        }
+    })
+
+    result = solver.solve_dependencies(
+        root_dependencies=[
+            vp.requirement("bar >=1.0")
+        ],
+        package_repository=repo
+    )
+
+    assert len(result) == 2
+    assert solver.Assignment("bar", vp.version("2.0")) in result
+    assert solver.Assignment("baz", vp.version("1.0")) in result

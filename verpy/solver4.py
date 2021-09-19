@@ -110,6 +110,43 @@ class DependencyConstraint(Constraint):
     def __eq__(self, o: object) -> bool:
         return hash(self) == hash(o)
 
+class IncompatibilityConstraint(Constraint):
+    
+    def __init__(self, assignments, trace_to=None):
+        self.assignments = set(assignments)
+        self.trace_to = trace_to
+
+    def is_violated_by(self, assignments):
+        return self.assignments.issubset(assignments)
+
+    def get_assignments(self):
+        return set(self.assignments)
+
+    def get_target_package_names(self):
+        return [assignment.package_name for assignment in self.assignments]
+
+    def is_constraint_on_package(self, package_name):
+        for assignment in self.assignments:
+            if package_name == assignment.package_name:
+                return True
+
+        return False
+
+    def issubset(self, other):
+        return self.assignments.issubset(other.assignments)
+
+    def __str__(self) -> str:
+        return "Not(" + " & ".join([str(a) for a in self.assignments]) + ")"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __hash__(self):
+        return hash(("IncompatibilityConstraint", *sorted(self.assignments, key=lambda a: hash(a))))
+
+    def __eq__(self, o: object) -> bool:
+        return hash(self) == hash(o)
+
 
 class Transaction:
 

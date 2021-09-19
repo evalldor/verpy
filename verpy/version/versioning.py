@@ -441,7 +441,7 @@ class AnySpecifier(VersionSet):
         return True
 
     def __str__(self):
-        return "None"
+        return "Any"
 
     def __repr__(self):
         return str(self)
@@ -459,10 +459,10 @@ class EqSpecifier(VersionSet):
         if self.original_string is not None:
             return self.original_string
         
-        return f"=={str(self.version)}"
+        return f"{str(self.version)}"
 
     def __repr__(self):
-        return f"=={repr(self.version)}"
+        return f"{repr(self.version)}"
 
     def __hash__(self):
         return hash(("==", self.version))
@@ -733,6 +733,7 @@ class Requirement:
 
     def __repr__(self):
         return f"{self.package_name} {self.version_set}"
+
 
 #
 # Maven Range parsing
