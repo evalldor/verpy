@@ -1,5 +1,5 @@
 import collections
-from verpy.version.versioning import Requirement
+from verpy.version.versioning import Requirement, as_requirement
 from . import version as verpy
 import itertools
 import typing
@@ -70,6 +70,9 @@ class Assignment:
     def as_requirement(self):
         return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version))
 
+    def as_complement_requirement(self):
+        return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version).complement())
+
     def __str__(self) -> str:
         return f"{self.package_name} {self.version}"
 
@@ -86,14 +89,12 @@ class Assignment:
 class RootAssignment(Assignment):
 
     def __init__(self) -> None:
-        super().__init__("__root__", "0")
-    
+        super().__init__("__root__", "1.0")
 
 class Term:
 
-    def __init__(self, requirement, polarity=True) -> None:
+    def __init__(self, requirement) -> None:
         self.requirement = requirement
-        self.polarity = polarity
 
     @property
     def package_name(self) -> str:
@@ -106,18 +107,12 @@ class Term:
     def truth_value(self, assignments) -> typing.Union[bool, None]:
         for assignment in assignments:
             if assignment.package_name == self.package_name:
-                if self.polarity:
-                    return assignment.version is not None and assignment.version in self.version_set
-                
-                return assignment.version is None or assignment.version not in self.version_set
+                return assignment.version in self.version_set
         
         return None
 
     def __str__(self) -> str:
-        if self.polarity:
-            return f"{self.requirement}"
-        
-        return f"not {self.requirement}"
+        return f"{self.requirement}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -126,8 +121,7 @@ class Term:
 class Clause:
 
     def __init__(self, terms : typing.List[Term] ) -> None:
-        assert (len({term.package_name for term in terms}) == len(terms), 
-            "There may only be one term per package in a clause")
+        assert len({term.package_name for term in terms}) == len(terms), "There may only be one term per package in a clause"
 
         self.terms = terms
 
@@ -148,6 +142,10 @@ class Clause:
     def __len__(self) -> int:
         return len(self.terms)
 
+    def __iter__(self) -> Term:
+        for term in self.terms:
+            yield term
+
     def __str__(self) -> str:
         return " or ".join([str(term) for term in self.terms])
 
@@ -161,29 +159,21 @@ class SearchState:
         self.repo = repo
         self.assignment_memory : typing.List[Assignment] = []
         self.clauses : typing.List[Clause] = []
+        self.assignments : typing.List[Assignment] = []
 
-        self.checkpoints : typing.List[Checkpoint] = [Checkpoint()]
+    def add_root_dependencies(self, *requirements) -> None:
+        root_assignment = RootAssignment()
+        self.clauses.append(Clause([Term(root_assignment.as_requirement())]))
+        self.assignments.append(root_assignment)
 
-    @property
-    def assignments(self) -> typing.List[Assignment]:
-        return list(itertools.chain(*[cp.assignments for cp in self.checkpoints]))
-
-    def add_root_dependency(self, requirement) -> None:
-        self.clauses.append(Clause([Term(requirement)]))
+        for requirement in requirements:
+            self.clauses.append(Clause([Term(root_assignment.as_complement_requirement()), Term(requirement)]))
 
     def add_assignment(self, assignment) -> None:
         assert not self.has_assignment(assignment.package_name)
 
-        self.checkpoints[-1].append(assignment)
-
-        if assignment not in self.assignment_memory:
-            self.assignment_memory.append(assignment)
-
-            for requirement in self.get_dependencies(assignment):
-                self.clauses.append(Clause([
-                    Term(assignment.as_requirement(), polarity=False),
-                    Term(requirement)
-                ]))
+        self.assignments.append(assignment)
+        self.load_dependencies(assignment)
 
     def has_assignment(self, package_name) -> bool:
         return self.get_assignment(package_name) != None
@@ -195,25 +185,23 @@ class SearchState:
         
         return None
 
-    def get_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
-        return self.repo.get_dependencies(assignment.package_name, assignment.version)
+    def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
+        if assignment.version != verpy.Version("none") and assignment not in self.assignment_memory:
+            self.assignment_memory.append(assignment)
+            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
+
+            for requirement in dependencies:
+                self.clauses.append(Clause([
+                    Term(assignment.as_complement_requirement()),
+                    Term(requirement)
+                ]))
 
     def get_versions(self, package_name) -> typing.List[verpy.Version]:
         return self.repo.get_versions(package_name)
         
-    def checkpoint(self) -> None:
-        self.checkpoints.append(Checkpoint())
-
     def backtrack(self, assignment) -> None:
-        checkpoint_to_restore = None
-        for checkpoint in self.checkpoints:
-            if assignment in checkpoint.assignments:
-                checkpoint_to_restore = checkpoint
-
-        assert checkpoint_to_restore is not None
-
-        index = self.checkpoints.index(checkpoint_to_restore)
-        self.checkpoints = self.checkpoints[:index]
+        index = self.assignments.index(assignment)
+        self.assignments = self.assignments[:index]
 
     def solution_is_complete(self) -> bool:
         return all([clause.truth_value(self.assignments) for clause in self.clauses])
@@ -244,6 +232,34 @@ class SearchState:
                     if term.package_name == package_name:
                         terms.append(term)
 
+    def get_latest_assignment_involving(self, package_names):
+        for assignment in reversed(self.assignments):
+            if assignment.package_name in package_names:
+                return assignment
+
+        return None
+
+    def get_unassigned_packages(self):
+        package_names = []
+        
+        for clause in self.clauses:
+            for package_name in clause.get_package_names():
+                if not self.has_assignment(package_name) and package_name not in package_names:
+                    package_names.append(package_name)
+
+        return package_names
+
+    def get_unsatisfied_clauses(self):
+        unsatisfied_clauses = []        
+        
+        for clause in self.clauses:
+            if clause.truth_value(self.assignments) is False:
+                unsatisfied_clauses.append(clause)
+
+        return unsatisfied_clauses
+
+    def get_assignment_depth(self):
+        pass
 
 def solve_dependencies(root_dependencies, package_repository):
     # Add explicit assignments to packages that are not chosen, e.g. assigned
@@ -252,34 +268,39 @@ def solve_dependencies(root_dependencies, package_repository):
 
     state = SearchState(package_repository)
 
-    for requirement in root_dependencies:
-        state.add_root_dependency(requirement)
+    state.add_root_dependencies(*root_dependencies)
 
     while not state.solution_is_complete():
 
-        state.checkpoint()
-
+        logger.debug("="*80)
         logger.debug(f"All assignments are: {state.assignments}")
+        logger.debug(f"Unassigned packages are: {state.get_unassigned_packages()}")
 
-        unsatisfied_clauses = []        
-        package_name = None
 
-        for clause in state.clauses:
-            if not clause.truth_value(state.assignments):
-                unsatisfied_clauses.append(clause)
-                for term in clause.terms:
-                    if term.polarity is True:
-                        package_name = term.package_name
-
-        logger.debug(f"Unsatisfied clauses are:")
-        for clause in unsatisfied_clauses:
-            logger.debug(f"\t\t{clause}")
-
+        package_name = state.get_unassigned_packages()[0]
         logger.debug(f"Looking at package {package_name}:")
 
 
         all_versions = state.get_versions(package_name)
         logger.debug(f"\tAvailable versions are: {all_versions}:")
+
+        if len(all_versions) == 0:
+            exit(0)
+
+
+        violated_clauses = []
+        version_to_assign = None
+
+        for version in [verpy.Version("none"), *all_versions]:
+            assignment_to_try = Assignment(package_name, version)
+            state.load_dependencies(assignment_to_try)
+
+            v_clauses = _get_violated_clauses([assignment_to_try] + list(filter(lambda x: x.package_name != package_name, state.assignments)), state.get_all_clauses_involving_package(package_name))
+            if len(v_clauses) > 0:
+                violated_clauses.extend(v_clauses)
+            else:
+                version_to_assign = version
+                break
 
 
         clauses = state.get_all_clauses_involving_package(package_name)
@@ -287,13 +308,30 @@ def solve_dependencies(root_dependencies, package_repository):
         for clause in clauses:
             logger.debug(f"\t\t{clause}")
 
-        
-        allowed_versions = _filter_allowed_version(state.assignments, clauses, package_name, all_versions)
-        logger.debug(f"\tAllowed versions are: {allowed_versions}:")
 
 
-        if len(allowed_versions) == 0:
-            resolve_conflict()
+        if version_to_assign is None:
+            terms = collections.defaultdict(list)
+
+            for clause in violated_clauses:
+                for term in clause:
+                    if term.package_name != package_name:
+                        terms[term.package_name].append(term)
+            
+            all_terms = []
+
+            for pkg_name, pkg_terms in terms.items():
+                if len(pkg_terms) > 1:
+                    version = verpy.union(*[term.version_set for term in pkg_terms])
+                    all_terms.append(Term(verpy.Requirement(pkg_name, version)))
+                else:
+                    all_terms.append(pkg_terms[0])
+
+
+            incompatibility = Clause(all_terms)
+            logger.debug(f"\tNo allowed versions. Created incompatibility {incompatibility}")
+            state.clauses.append(incompatibility)
+            state.backtrack(state.get_latest_assignment_involving(incompatibility.get_package_names()))
         
         elif state.has_assignment(package_name):
             
@@ -301,35 +339,22 @@ def solve_dependencies(root_dependencies, package_repository):
             logger.debug(f"\tFound existing assignment: {assignment}")
             
 
-            if assignment.version != allowed_versions[0]:
+            if assignment.version != version_to_assign:
                 logger.debug(f"\t\tThe existing assignment is not ok! Backtracking!")
                 state.backtrack(assignment)
-            else:
-                exit(0)
+
         else:
-            logger.debug(f"\tAssigning version {allowed_versions[0]} to {package_name}.")
-            state.add_assignment(Assignment(package_name, allowed_versions[0]))
+            logger.debug(f"\tAssigning version {version_to_assign} to {package_name}.")
+            state.add_assignment(Assignment(package_name, version_to_assign))
 
 
-    return state.assignments
+    return list(filter(lambda x: not isinstance(x, RootAssignment) and x.version != verpy.Version("none"), state.assignments))
 
 
-
-def _filter_allowed_version(assignments, clauses, package_name, all_versions):
-    assignments = list(filter(lambda x: x.package_name != package_name, assignments))
-
-    def allowed_version_filter(version):
-        _assignments = assignments + [Assignment(package_name, version)]
-
-        for clause in clauses:
-            if clause.truth_value(_assignments) is False:
-                return False
-        
-        return True
-
-    return list(filter(allowed_version_filter, all_versions))
-
-
-def resolve_conflict():
-    pass
-
+def _get_violated_clauses(assignments, clauses):
+    violated_clauses = []
+    for clause in clauses:
+        if clause.truth_value(assignments) is False:
+            violated_clauses.append(clause)
+    
+    return violated_clauses

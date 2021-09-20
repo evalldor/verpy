@@ -633,10 +633,10 @@ class NotOperator(VersionSet):
         if self.original_string is not None:
             return self.original_string
         
-        return f"!{str(self.version)}"
+        return f"!{str(self.specifier)}"
 
     def __repr__(self):
-        return f"!{repr(self.version)}"
+        return f"!{repr(self.specifier)}"
 
     def __hash__(self):
         return hash(("!", self.specifier))
