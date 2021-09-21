@@ -21,8 +21,6 @@ class IncompatibilityCause(Cause):
     pass
 
 
-
-
 class SolverError(Exception):
     pass
 
@@ -177,7 +175,6 @@ class SearchState:
         self.clauses : typing.List[Clause] = []
         self.assignments : typing.List[Assignment] = []
 
-
     def add_root_dependencies(self, *requirements) -> None:
         root_assignment = RootAssignment()
 
@@ -240,8 +237,8 @@ class SearchState:
         if isinstance(assignment, RootAssignment):
             return 0
         
-        dependant_assignments = self.get_dependants(assignment.package_name)
-        depths = [self.get_assignment_depth(dependant) for dependant in dependant_assignments]
+        dependant_assignments = self.get_dependants(assignment)
+        depths = [self.get_assignment_depth(dependant)+1 for dependant in dependant_assignments]
 
         return min(depths)
 
@@ -267,12 +264,17 @@ class SearchState:
 
         return clauses
 
-    def get_latest_assignment_involving(self, package_names):
-        for assignment in reversed(self.assignments):
+    def get_deepest_assignment_involving(self, package_names):
+        deepest = None
+        max_depth = -1
+        for assignment in self.assignments:
             if assignment.package_name in package_names:
-                return assignment
+                depth = self.get_assignment_depth(assignment)
+                if depth >= max_depth:
+                    max_depth = depth
+                    deepest = assignment
 
-        return None
+        return deepest
 
     def get_unassigned_packages(self):
         package_names = []
@@ -293,11 +295,18 @@ class SearchState:
 
         return unsatisfied_clauses
 
+    def get_current_solution(self):
+        solution = {}
+
+        for assignment in self.assignments:
+            if not isinstance(assignment, RootAssignment) and assignment.version != verpy.Version("none"):
+                solution[assignment.package_name] = str(assignment.version)
+
+        return solution
+
 
 def solve_dependencies(root_dependencies, package_repository):
     # TODO: 
-    # * Assignment depth
-    # * Output dict
     # * Version selection strategies
     
 
@@ -358,7 +367,7 @@ def solve_dependencies(root_dependencies, package_repository):
             
             state.clauses.append(incompatibility)
             
-            state.backtrack(state.get_latest_assignment_involving(incompatibility.get_package_names()))
+            state.backtrack(state.get_deepest_assignment_involving(incompatibility.get_package_names()))
         
         elif state.has_assignment(package_name):
             
@@ -369,16 +378,18 @@ def solve_dependencies(root_dependencies, package_repository):
             if assignment.version != version_to_assign:
                 logger.debug(f"\t\tThe existing assignment is not ok! Backtracking!")
                 state.backtrack(assignment)
+            else:
+                assert False, "Should never happend"
 
         else:
             logger.debug(f"\tAssigning version {version_to_assign} to {package_name}.")
             state.add_assignment(Assignment(package_name, version_to_assign))
 
 
-    return list(filter(lambda x: not isinstance(x, RootAssignment) and x.version != verpy.Version("none"), state.assignments))
+    return state.get_current_solution()
 
 
-def _try_assignment(state, assignment_to_try):
+def _try_assignment(state: SearchState, assignment_to_try: Assignment):
     
     state.load_dependencies(assignment_to_try)
     
@@ -397,7 +408,7 @@ def _try_assignment(state, assignment_to_try):
     return violated_clauses
 
 
-def _simplify_clause(clause):
+def _simplify_clause(clause : Clause) -> Clause:
     terms = collections.defaultdict(list)
 
     for term in clause:
@@ -415,5 +426,5 @@ def _simplify_clause(clause):
     return Clause(simplified_terms)
 
 
-def _simplify_term(term, all_versions):
+def _simplify_term(term : Term, all_versions: typing.List[verpy.Version]) -> Term:
     pass

@@ -31,8 +31,6 @@ def test_solver_1():
         }
     })
 
-
-    
     result = solver.solve_dependencies(
         root_dependencies=[
             vp.requirement("bar >=1.0"),
@@ -41,10 +39,11 @@ def test_solver_1():
         package_repository=repo
     )
 
-    assert len(result) == 3
-    assert solver.Assignment("foo", vp.version("1.0")) in result
-    assert solver.Assignment("bar", vp.version("1.0")) in result
-    assert solver.Assignment("baz", vp.version("1.0")) in result
+    assert result == {
+        "foo": "1.0",
+        "bar": "1.0",
+        "baz": "1.0",
+    }
 
 
 def test_solver_2():
@@ -75,11 +74,10 @@ def test_solver_2():
         package_repository=repo
     )
 
-    assert len(result) == 2
-    assert solver.Assignment("bar", vp.version("1.0")) in result
-    assert solver.Assignment("baz", vp.version("1.0")) in result
-
-    # print(result)
+    assert result == {
+        "bar": "1.0",
+        "baz": "1.0",
+    }
 
 
 def test_solver_3():
@@ -121,10 +119,11 @@ def test_solver_3():
         package_repository=repo
     )
 
-    assert len(result) == 2
-    assert solver.Assignment("bar", vp.version("1.0")) in result
-    assert solver.Assignment("baz", vp.version("1.0")) in result
-    
+    assert result == {
+        "bar": "1.0",
+        "baz": "1.0",
+    }
+
 
 def test_solver_4():
 
@@ -162,10 +161,11 @@ def test_solver_4():
         package_repository=repo
     )
 
-    assert len(result) == 3
-    assert solver.Assignment("bar", vp.version("2.0")) in result
-    assert solver.Assignment("foo", vp.version("1.0")) in result
-    assert solver.Assignment("taz", vp.version("1.0")) in result
+    assert result == {
+        "bar": "2.0",
+        "foo": "1.0",
+        "taz": "1.0"
+    }
 
 
 def test_solver_5():
@@ -239,9 +239,10 @@ def test_solver_6():
         package_repository=repo
     )
 
-    assert len(result) == 2
-    assert solver.Assignment("y", vp.version("2.0")) in result
-    assert solver.Assignment("c", vp.version("1.0")) in result
+    assert result == {
+        "y": "2.0",
+        "c": "1.0"
+    }
 
 
 def test_solver_7():
@@ -280,10 +281,11 @@ def test_solver_7():
         package_repository=repo
     )
     
-    assert len(result) == 3
-    assert solver.Assignment("bar", vp.version("1.0")) in result
-    assert solver.Assignment("foo", vp.version("1.0")) in result
-    assert solver.Assignment("baz", vp.version("1.0")) in result
+    assert result == {
+        "bar": "1.0",
+        "foo": "1.0",
+        "baz": "1.0"
+    }
 
 
 def test_solver_8():
@@ -326,13 +328,12 @@ def test_solver_8():
         package_repository=repo
     )
 
-    assert len(result) == 4
-    assert solver.Assignment("bar", vp.version("1.0")) in result
-    assert solver.Assignment("baz", vp.version("2.0")) in result
-    assert solver.Assignment("foo", vp.version("1.0")) in result
-    assert solver.Assignment("taz", vp.version("1.0")) in result
-
-    # print(result)
+    assert result == {
+        "bar": "1.0",
+        "foo": "1.0",
+        "baz": "2.0",
+        "taz": "1.0"
+    }
 
 
 def test_solver_9():
@@ -366,6 +367,7 @@ def test_solver_9():
         package_repository=repo
     )
 
-    assert len(result) == 2
-    assert solver.Assignment("bar", vp.version("2.0")) in result
-    assert solver.Assignment("baz", vp.version("1.0")) in result
+    assert result == {
+        "bar": "2.0",
+        "baz": "1.0",
+    }
