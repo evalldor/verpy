@@ -161,7 +161,7 @@ def test_solver_4():
         ],
         package_repository=repo
     )
-    print(result)
+
     assert len(result) == 3
     assert solver.Assignment("bar", vp.version("2.0")) in result
     assert solver.Assignment("foo", vp.version("1.0")) in result
@@ -194,7 +194,7 @@ def test_solver_5():
             package_repository=repo
         )
 
-        print(result)
+        # print(result)
 
 
 def test_solver_6():
@@ -326,11 +326,13 @@ def test_solver_8():
         package_repository=repo
     )
 
-    # assert len(result) == 2
-    # assert solver.Assignment("bar", vp.version("1.0")) in result
-    # assert solver.Assignment("baz", vp.version("1.0")) in result
+    assert len(result) == 4
+    assert solver.Assignment("bar", vp.version("1.0")) in result
+    assert solver.Assignment("baz", vp.version("2.0")) in result
+    assert solver.Assignment("foo", vp.version("1.0")) in result
+    assert solver.Assignment("taz", vp.version("1.0")) in result
 
-    print(result)
+    # print(result)
 
 
 def test_solver_9():
