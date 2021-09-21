@@ -1,517 +1,44 @@
 import collections
+import copy
 import itertools
-import typing
-from . import version as verpy
-
 import logging
+import typing
+
+from . import version as verpy
 
 logger = logging.getLogger("solver")
 
-class Assignment:
 
-    def __init__(self, package_name, version) -> None:
+class Cause:
+    pass
+
+
+class DependencyCause(Cause):
+    
+    def __init__(self, dependant, dependency) -> None:
+        self.dependant = dependant
+        self.dependency = dependency
+
+    def __str__(self) -> str:
+        return f"Dependency({self.dependant} -> {self.dependency})"
+
+
+class ConflictCause(Cause):
+    pass
+
+
+class NoAllowedVersionsCause(ConflictCause):
+
+    def __init__(self, package_name, violated_clauses) -> None:
         self.package_name = package_name
-        self.version = version
-
-    def __hash__(self):
-        return hash((self.package_name, self.version))
+        self.violated_clauses = violated_clauses
 
     def __str__(self) -> str:
-        return f"{self.package_name} {self.version}"
+        return f"NoAllowedVersions(package_name={self.package_name}, violated_clauses={self.violated_clauses})"
 
-    def __repr__(self) -> str:
-        return str(self)
 
-    def __eq__(self, o: object) -> bool:
-        return hash(self) == hash(o)
-
-class Incompatibility:
-
-    def __init__(self, assignments) -> None:
-        self.assignments = set(assignments)
-
-    def is_subset_of(self, other):
-        return self.assignments.issubset(other.assignments)
-    
-    def __str__(self) -> str:
-        return " ".join([str(a) for a in self.assignments])
-
-    def __repr__(self) -> str:
-        return str(self)
-
-
-class Conflict:
-
-    def __init__(self, cause, effect) -> None:
-        self.cause = cause
-        self.effect = effect
-
-    def is_satisfied_by(self, assignments):
-        return self.cause.is_subset_of(Incompatibility(assignments))
-
-
-class Constraint:
-
-    def __init__(self, source, requirement) -> None:
-        self.source = source
-        self.package_name = requirement.package_name
-        self.version_set = requirement.version_set
-
-    def is_active_for(self, assignments):
-        if isinstance(self.source, Assignment):
-            return self.source in assignments
-        
-        if isinstance(self.source, Incompatibility):
-            return self.source.is_subset_of(Incompatibility(assignments))
-
-        assert False
-
-    def is_violated_for(self, assignments):
-        for assignment in assignments:
-            if assignment.package_name == self.package_name:
-                if assignment.version not in self.version_set:
-                    return True
-        
-        return False
-
-    def is_source_satisfied_by(self, assignments):
-        if isinstance(self.source, Assignment):
-            return self.source in assignments
-        
-        if isinstance(self.source, Incompatibility):
-            return self.source.is_subset_of(Incompatibility(assignments))
-
-        assert False
-
-class Book2:
-    def __init__(self, repo) -> None:
-        self.repo = repo
-        self.assignments = []
-        self.constraints = []
-        self.frontiers = []
-
-    def get_active_constraints(self):
-        pass
-
-    def get_available_versions(self, package_name):
-        return self.repo.get_versions(package_name)
-
-    def get_allowed_versions(self, package_name):
-
-        all_versions = self.get_available_versions(package_name)
-
-        disallowed_versions = []
-
-        for version in all_versions:
-            for constraint in self.get_constraints(package_name):
-                if constraint.is_source_satisfied_by(self.assignments + [Assignment(package_name, version)]):
-                    if version not in constraint.version_set:
-                        disallowed_versions.append(version)
-         
-        for ver in disallowed_versions:
-            all_versions.remove(ver)
-
-        return all_versions
-
-    def get_assignment_for(self, package_name):
-        
-        for assignment in self.assignments:
-            if assignment.package_name == package_name:
-                return assignment
-        
-        return None
-
-    def has_assignment(self, package_name):
-        return self.get_assignment_for(package_name) is not None
-
-    def get_constraints(self, package_name):
-        
-        constraints = []
-
-        for constraint in self.constraints:
-            if constraint.package_name == package_name:
-                constraints.append(constraint)
-        
-        return constraints
-
-    def get_dependency_constraints(self, package_name):
-        constraints = []
-
-        for constraint in self.get_active_constraints():
-            if constraint.package_name == package_name and isinstance(constraint.source, Assignment):
-                constraints.append(constraint)
-        
-        return constraints
-
-    def get_non_dependency_constraints(self, package_name):
-        constraints = []
-
-        for constraint in self.get_active_constraints():
-            if constraint.package_name == package_name and not isinstance(constraint.source, Assignment):
-                constraints.append(constraint)
-        
-        return constraints
-
-    def get_active_constraints(self, package_name, assignments=None):
-        if assignments is None:
-            assignments = self.assignments
-
-        active_constraints = []
-
-        for constraint in self.constraints:
-            if constraint.package_name == package_name and constraint.is_source_satisfied_by(assignments):
-                active_constraints.append(constraint)
-        
-        return active_constraints
-    
-    def remove_assignment(self, package_name):
-        assignment = self.get_assignment_for(package_name)
-        self.assignments.remove(assignment)
-
-        constraints_to_remove = []
-
-        for constraint in self.constraints:
-            if constraint.source is assignment:
-                constraints_to_remove.append(constraint)
-
-                if constraint.package_name not in self.frontiers:
-                    self.frontiers.insert(0, constraint.package_name)
-
-        for constraint in constraints_to_remove:
-            self.constraints.remove(constraint)
-            
-    def add_assignment(self, assignment, dependencies=None):
-        
-        assert not self.has_assignment(assignment.package_name)
-
-        if dependencies is None:
-            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
-        
-        self.assignments.append(assignment)
-
-        for requirement in dependencies:
-            self.constraints.append(Constraint(assignment, requirement))
-            if requirement.package_name not in self.frontiers:
-                self.frontiers.append(requirement.package_name)
-    
-    def add_constraint(self, constraint):
-        self.constraints.append(constraint)
-    
-    def has_frontiers(self):
-        return len(self.frontiers) > 0
-
-    def pop_frontier(self):
-        return self.frontiers.pop(0)
-
-    def add_frontier(self, package_name):
-        self.frontiers.append(package_name)
-
-    def get_assignments(self):
-        return self.assignments
-
-
-class Book:
-
-    def __init__(self, repo) -> None:
-        self.repo = repo
-        self.assignments = {}
-        self.incompatibilities = []
-        self.frontiers = []
-        self.conflicts = []
-
-    def get_available_versions(self, package_name):
-        return self.repo.get_versions(package_name)
-
-    def get_allowed_versions(self, package_name):
-        requirements = self.get_requirements_on(package_name)
-        intersection = verpy.intersection(*[req.version_set for req in requirements])
-        allowed_versions = intersection.filter_allowed(self.get_available_versions(package_name))
-        
-        versions_with_conflicts = []
-        for version in allowed_versions:
-            for conflict in self.conflicts:
-                if conflict.is_satisfied_by(self.get_assignments() + [Assignment(package_name, version)]):
-                    versions_with_conflicts.append(version)
-                    break
-
-
-        for ver in versions_with_conflicts:
-            allowed_versions.remove(ver)
-
-        return allowed_versions
-
-    def get_all_requirements_for_package(self, package_name):
-        requirements = []
-
-        for assignment, reqs in self.assignments.items():
-            
-            for req in reqs:
-                if req.package_name == package_name:
-                    requirements.append((assignment, req))
-
-        return requirements
-
-    def get_requirements_on(self, package_name):
-        requirements = []
-
-        for assignment, reqs in self.assignments.items():
-            
-            for req in reqs:
-                if req.package_name == package_name:
-                    requirements.append(req)
-
-        return requirements
-
-    def get_assignments(self):
-        return list(self.assignments.keys())
-    
-    def get_assignment_for(self, package_name):
-        
-        for assignment in self.assignments.keys():
-            if assignment.package_name == package_name:
-                return assignment
-        
-        return None
-
-    def has_assignment(self, package_name):
-        return self.get_assignment_for(package_name) is not None
-
-    def add_assignment(self, package_name, package_version, package_requirements=None):
-        assignment = Assignment(package_name, package_version)
-        if package_requirements is None:
-            package_requirements = self.repo.get_dependencies(package_name, package_version)
-        
-        if self.has_assignment(package_name):
-            raise ValueError(f"Assignment for {package_name} already exists!")
-
-        self.assignments[assignment] = package_requirements
-
-        for requirement in package_requirements:
-            if requirement.package_name not in self.frontiers:
-                self.frontiers.append(requirement.package_name)
-
-    def remove_assignment(self, package_name):
-        ass = self.get_assignment_for(package_name)
-        
-        requirements = self.assignments[ass]
-
-        for req in requirements:
-            if req.package_name not in self.frontiers:
-                self.frontiers.insert(0, req.package_name)
-
-        del self.assignments[ass]
-
-    def add_conflict(self, conflict):
-        self.conflicts.append(conflict)
-
-    def has_frontiers(self):
-        return len(self.frontiers) > 0
-
-    def pop_frontier(self):
-        return self.frontiers.pop(0)
-
-    def add_frontier(self, package_name):
-        self.frontiers.append(package_name)
-
-    
-
-def solve_dependencies(book):
-    while book.has_frontiers():
-
-        package_name = book.pop_frontier()
-        logger.debug(f"Looking at package {package_name}:")
-
-
-        dependency_constraints = book.get_dependency_constraints(package_name)
-        logger.debug(f"\tDependency constraints are:")
-        for constraint in dependency_constraints:
-            logger.debug(f"\t\t{constraint.source} -> {constraint.package_name} {constraint.version_set}")
-
-
-
-        if len(dependency_constraints) == 0:
-            logger.debug(f"\t\tNo dependents! Removing package!")
-            if book.has_assignment(package_name):
-                book.remove_assignment(package_name)
-            continue
-
-
-
-        non_dependency_constraints = book.get_non_dependency_constraints(package_name)
-        logger.debug(f"\tOther constraints are:")
-        for constraint in non_dependency_constraints:
-            logger.debug(f"\t\t{constraint.source} -> {constraint.package_name} {constraint.version_set}")
-
-        
-        all_versions = book.get_available_versions(package_name)
-        logger.debug(f"\tAvailable versions are: {all_versions}")
-
-
-        allowed_versions = book.get_allowed_versions(package_name)
-        logger.debug(f"\tAllowed versions are: {allowed_versions}")
-        
-
-
-def _solve_dependencies_for(package_name, book):
-    _debug_print_package(package_name, book)
-
-    requirements = book.get_requirements_on(package_name)
-
-    all_versions = book.get_available_versions(package_name)
-
-    intersection = verpy.intersection(*[req.version_set for req in requirements])
-    allowed_versions = intersection.filter_allowed(all_versions)
-    
-    if len(allowed_versions) == 0:
-        pass
-
-    if book.has_assignment(package_name):
-        assignment = book.get_assignment_for(package_name)
-        logger.debug(f"\tFound existing assignment: {assignment}")
-        
-        if assignment.version not in allowed_versions:
-            logger.debug(f"\t\tThe existing assignment is not ok! Removing!")
-            
-            # _resolve_conflict(package_name, [assignment.version], ass_reqs, book)
-            
-            # book.remove_assignment(package_name)
-        elif assignment.version != allowed_versions[0]:
-            logger.debug(f"\t\tThe existing assignment is ok but not highest! Removing!")
-            book.remove_assignment(package_name)
-        else:
-            logger.debug(f"\t\tThe existing assignment is ok!")
-            return
-
-    logger.debug(f"\tAssigning version {allowed_versions[0]} to {package_name}")
-    book.add_assignment(package_name, allowed_versions[0])
-
-
-def _debug_print_package(package_name, book):
-    logger.debug(f"Looking at package {package_name}:")
-
-    ass_reqs = book.get_all_requirements_for_package(package_name)
-    logger.debug(f"\tRequirements are:")
-    for assignment, requirement in ass_reqs:
-        logger.debug(f"\t\t{assignment} -> {requirement}")
-
-    all_versions = book.get_available_versions(package_name)
-    logger.debug(f"\tAvailable versions are: {all_versions}")
-
-    intersection = verpy.intersection(*[req.version_set for ass, req in ass_reqs])
-    allowed_versions = intersection.filter_allowed(all_versions)
-    logger.debug(f"\tAllowed versions are: {allowed_versions}")
-
-
-class DependencySolver:
-
-    def __init__(self, repo) -> None:
-        self._root_dependencies = []
-        self.repo = repo
-
-    def add_dependency(self, dependency : verpy.Requirement):
-        self._root_dependencies.append(dependency)
-
-    def get_all_dependencies_recursive(self):
-        book = Book(self.repo)
-        book.add_assignment("root", verpy.version("1.0"), self._root_dependencies)
-
-        for req in self._root_dependencies:
-            _solve_dependencies_for(req.package_name, book)
-
-        return book.get_assignments()
-
-    def get_all_dependencies(self):
-        book = Book(self.repo)
-        book.add_assignment("root", verpy.version("1.0"), list(self._root_dependencies))
-       
-    
-        while book.has_frontiers():
-            package_name = book.pop_frontier()
-            logger.debug(f"Looking at package {package_name}:")
-
-            ass_reqs = book.get_all_requirements_for_package(package_name)
-            logger.debug(f"\tRequirements are:")
-            for assignment, requirement in ass_reqs:
-                logger.debug(f"\t\t{assignment} -> {requirement}")
-
-            if len(ass_reqs) == 0:
-                logger.debug(f"\t\tNo requirements! Removing package!")
-                if book.has_assignment(package_name):
-                    book.remove_assignment(package_name)
-                continue
-
-            all_versions = self.repo.get_versions(package_name)
-            logger.debug(f"\tAvailable versions are: {all_versions}")
-
-            # intersection = verpy.intersection(*[req.version_set for ass, req in ass_reqs])
-            allowed_versions = book.get_allowed_versions(package_name)
-            logger.debug(f"\tAllowed versions are: {allowed_versions}")
-
-
-            if len(allowed_versions) == 0:
-                logger.debug(f"\tNo allowed versions! Running conflict resolution")
-                reqs = book.get_requirements_on(package_name)
-                logger.debug(reqs)
-                exit(0)
-
-            if book.has_assignment(package_name):
-                assignment = book.get_assignment_for(package_name)
-                logger.debug(f"\tFound existing assignment: {assignment}")
-                
-                if assignment.version not in allowed_versions:
-                    logger.debug(f"\t\tThe existing assignment is not ok! Running conflict resolution!")
-                    
-                    incompatibilities = self._find_incompatibilities([assignment.version], ass_reqs)
-
-                    for incompat in incompatibilities:
-                        incompat.assignments.add(assignment)
-                        book.add_conflict(Conflict(incompat, assignment))
-                    
-                    book.remove_assignment(package_name)
-                    book.add_frontier(package_name)
-                    continue
-                elif assignment.version != allowed_versions[0]:
-                    logger.debug(f"\t\tThe existing assignment is ok but not highest! Removing!")
-                    book.remove_assignment(package_name)
-                else:
-                    logger.debug(f"\t\tThe existing assignment is ok!")
-                    continue
-
-            logger.debug(f"\tAssigning version {allowed_versions[0]} to {package_name}")
-            book.add_assignment(package_name, allowed_versions[0])
-
-        return book.get_assignments()
-
-    def _find_incompatibilities(self, all_versions, ass_reqs):
-        # Find the requirements that are conflicting with the assignment
-        # by going through all possible requirement combinations
-        all_combinations = list(itertools.chain(*[itertools.combinations(ass_reqs, i) for i in range(1, len(ass_reqs)+1)]))
-        logger.debug(all_combinations)
-
-        found_incompatibilities = []
-
-        for combination in all_combinations:
-            intersection = verpy.intersection(*[req.version_set for ass, req in combination])
-            if len(intersection.filter_allowed(all_versions)) == 0:
-                assignments = [ass for ass, req in combination]
-                found_incompatibilities.append(Incompatibility(assignments))
-        
-        # Only save the minimal incompatibilities
-        to_remove = []
-        for incompat_1 in found_incompatibilities:
-            for incompat_2 in found_incompatibilities:
-                if incompat_1 is not incompat_2:
-                    if incompat_1.is_subset_of(incompat_2):
-                        to_remove.append(incompat_2)
-
-        for incompat in to_remove:
-            found_incompatibilities.remove(incompat)
-        
-        logger.debug("Found the following incompatibilities")
-        logger.debug(f"\t{found_incompatibilities}")
-        
-        return found_incompatibilities
-
+class SolverError(Exception):
+    pass
 
 
 class Repository:
@@ -538,3 +65,394 @@ class DictRepository(Repository):
 
     def get_dependencies(self, package_name, package_version):
         return list(self.contents[package_name][package_version])
+
+
+class Assignment:
+
+    def __init__(self, package_name: str, version: verpy.Version) -> None:
+        self.package_name = package_name
+        self.version = version
+
+    def as_requirement(self):
+        return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version))
+
+    def as_complement_requirement(self):
+        return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version).complement())
+
+    def __str__(self) -> str:
+        return f"{self.package_name} {self.version}"
+
+    def __repr__(self) -> str:
+        return str(self)
+    
+    def __hash__(self) -> int:
+        return hash(("Assignment", self.package_name, self.version))
+
+    def __eq__(self, other) -> bool:
+        return hash(self) == hash(other)
+
+
+class RootAssignment(Assignment):
+
+    def __init__(self) -> None:
+        super().__init__("__root__", "1.0")
+
+
+class Term:
+
+    def __init__(self, requirement) -> None:
+        self.requirement = requirement
+
+    @property
+    def package_name(self) -> str:
+        return self.requirement.package_name
+    
+    @property
+    def version_set(self) -> verpy.VersionSet:
+        return self.requirement.version_set
+
+    def truth_value(self, assignments) -> typing.Union[bool, None]:
+        for assignment in assignments:
+            if assignment.package_name == self.package_name:
+                return assignment.version in self.version_set
+        
+        return None
+
+    def __str__(self) -> str:
+        return f"{self.requirement}"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class Clause:
+
+    def __init__(self, terms: typing.List[Term], cause: Cause=None) -> None:
+        self.terms = terms
+        self.cause = cause
+
+    def truth_value(self, assignments) -> bool:
+        truth_values = [term.truth_value(assignments) for term in self.terms]
+
+        if True in truth_values:
+            return True
+        
+        if None in truth_values:
+            return None
+        
+        return False
+
+    def get_package_names(self) -> typing.List[str]:
+        package_names = []
+
+        for term in self.terms:
+            if term.package_name not in package_names:
+                package_names.append(term.package_name)
+
+        return package_names
+
+    def __len__(self) -> int:
+        return len(self.terms)
+
+    def __iter__(self) -> Term:
+        for term in self.terms:
+            yield term
+
+    def __str__(self) -> str:
+        return " or ".join([str(term) for term in self.terms])
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class Dependency(Clause):
+
+    def __init__(self, dependant: Assignment, dependency: verpy.Requirement) -> None:
+        super().__init__(
+            terms=[Term(dependant.as_complement_requirement()), Term(dependency)], 
+            cause=DependencyCause(dependant, dependency)
+        )
+
+        # These are stored here as shorthands to simplify error reporting
+        self.dependant = dependant
+        self.dependency = dependency
+
+
+class SearchState:
+    """Used by the solver to hold relevant state during the search
+    """
+
+    def __init__(self, repo) -> None:
+        self.repo = repo
+        self.assignment_memory : typing.List[Assignment] = []
+        self.clauses : typing.List[Clause] = []
+        self.assignments : typing.List[Assignment] = []
+
+    def add_root_dependencies(self, *requirements) -> None:
+        root_assignment = RootAssignment()
+
+        # This clause forces to root package to be selected. Otherwise the
+        # solver would simply unassign root and be done.
+        self.clauses.append(Clause([Term(root_assignment.as_requirement())]))
+
+
+        self.assignments.append(root_assignment)
+
+        for requirement in requirements:
+            self.clauses.append(Dependency(root_assignment, requirement))
+
+    def add_assignment(self, assignment) -> None:
+        assert not self.has_assignment(assignment.package_name)
+
+        self.assignments.append(assignment)
+        
+        self.load_dependencies(assignment)
+
+    def has_assignment(self, package_name) -> bool:
+        return self.get_assignment(package_name) != None
+
+    def get_assignment(self, package_name) -> bool:
+        for assignment in self.assignments:
+            if assignment.package_name == package_name:
+                return assignment
+        
+        return None
+
+    def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
+        if assignment.version != verpy.Version("none") and assignment not in self.assignment_memory:
+            self.assignment_memory.append(assignment)
+            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
+
+            for requirement in dependencies:
+                self.clauses.append(Dependency(assignment, requirement))
+
+    def get_versions(self, package_name) -> typing.List[verpy.Version]:
+        return self.repo.get_versions(package_name)
+    
+    def get_dependants(self, assignment):
+        dependants = []
+        for clause in self.clauses:
+            if isinstance(clause, Dependency) and clause.dependency.package_name == assignment.package_name:
+                if clause.dependant in self.assignments:
+                    dependants.append(clause.dependant)
+        
+        return dependants
+
+    def get_dependencies_assignments(self, assignment):
+        dependency = []
+        for clause in self.clauses:
+            if isinstance(clause, Dependency) and clause.dependant == assignment and clause.dependency in self.assignments:
+                dependency.append(clause.dependant)
+        
+        return dependency
+
+    def get_assignment_depth(self, assignment):
+        if isinstance(assignment, RootAssignment):
+            return 0
+        
+        dependant_assignments = self.get_dependants(assignment)
+        depths = [self.get_assignment_depth(dependant)+1 for dependant in dependant_assignments]
+
+        return min(depths)
+
+    def backtrack(self, assignment) -> None:
+        
+        # Remove all assignments that depend on this assignment
+        dependencies = self.get_dependencies_assignments(assignment)
+    
+        for dependency in dependencies:
+            self.backtrack(dependency)
+
+        if not isinstance(assignment, RootAssignment):
+            self.assignments.remove(assignment)
+
+    def solution_is_complete(self) -> bool:
+        return all([clause.truth_value(self.assignments) for clause in self.clauses])
+
+    def get_all_clauses_involving_package(self, package_name) -> typing.List[Clause]:
+        clauses = []
+        
+        for clause in self.clauses:
+            if package_name in clause.get_package_names():
+                clauses.append(clause)
+
+        return clauses
+
+    def get_deepest_assignment_involving(self, package_names):
+        deepest = None
+        max_depth = -1
+        for assignment in self.assignments:
+            if assignment.package_name in package_names:
+                depth = self.get_assignment_depth(assignment)
+                if depth >= max_depth:
+                    max_depth = depth
+                    deepest = assignment
+
+        return deepest
+
+    def get_unassigned_packages(self):
+        package_names = []
+        
+        for clause in self.clauses:
+            for package_name in clause.get_package_names():
+                if not self.has_assignment(package_name) and package_name not in package_names:
+                    package_names.append(package_name)
+
+        return package_names
+
+    def get_unsatisfied_clauses(self):
+        unsatisfied_clauses = []        
+        
+        for clause in self.clauses:
+            if clause.truth_value(self.assignments) is False:
+                unsatisfied_clauses.append(clause)
+
+        return unsatisfied_clauses
+
+    def get_current_solution(self):
+        solution = {}
+
+        for assignment in self.assignments:
+            if not isinstance(assignment, RootAssignment) and assignment.version != verpy.Version("none"):
+                solution[assignment.package_name] = str(assignment.version)
+
+        return solution
+
+    def has_failed(self):
+        for clause in self.clauses:
+            if clause.truth_value([self.assignments[0]]) is False:
+                return True
+
+        return False
+
+def solve_dependencies(root_dependencies, package_repository):
+    # TODO: 
+    # * Version selection strategies
+    # * Error reporting
+    
+
+    state = SearchState(package_repository)
+
+    state.add_root_dependencies(*root_dependencies)
+
+    while not state.solution_is_complete():
+
+        if state.has_failed():
+            report_error(state)
+
+        logger.debug("="*80)
+        logger.debug(f"All assignments are: {state.assignments}")
+        logger.debug(f"Unassigned packages are: {state.get_unassigned_packages()}")
+
+
+        package_name = state.get_unassigned_packages()[0]
+        logger.debug(f"Looking at package {package_name}:")
+
+
+        all_versions = state.get_versions(package_name)
+        logger.debug(f"\tAvailable versions are: {all_versions}:")
+
+
+        all_violated_clauses = []
+        version_to_assign = None
+
+        for version in [verpy.Version("none"), *all_versions]:
+            assignment_to_try = Assignment(package_name, version)
+
+            violated_clauses = try_assignment(state, assignment_to_try)
+            
+            if len(violated_clauses) == 0:
+                version_to_assign = version
+                break
+            
+            for clause in violated_clauses:
+                if clause not in all_violated_clauses:
+                    all_violated_clauses.append(clause)
+
+
+        clauses = state.get_all_clauses_involving_package(package_name)
+        logger.debug(f"\tRelevant clauses are:")
+        for clause in clauses:
+            logger.debug(f"\t\t{clause}")
+
+
+
+        if version_to_assign is None:
+            # We have a conflict
+            terms = []
+
+            for clause in all_violated_clauses:
+                for term in clause:
+                    if term.package_name != package_name:
+                        terms.append(term)
+
+            incompatibility = Clause(terms, NoAllowedVersionsCause(package_name, violated_clauses))
+
+            logger.debug(f"\tConflict: no allowed versions! Created incompatibility {incompatibility}.")
+            
+            state.clauses.append(incompatibility)
+            
+            state.backtrack(state.get_deepest_assignment_involving(incompatibility.get_package_names()))
+
+        else:
+            logger.debug(f"\tAssigning version {version_to_assign} to {package_name}.")
+            state.add_assignment(Assignment(package_name, version_to_assign))
+
+
+    return state.get_current_solution()
+
+
+def try_assignment(state: SearchState, assignment_to_try: Assignment):
+    
+    state.load_dependencies(assignment_to_try)
+    
+    assignments_to_use = [ass for ass in state.assignments if ass.package_name != assignment_to_try.package_name]
+    assignments_to_use.append(assignment_to_try)
+
+    relevant_clauses = state.get_all_clauses_involving_package(assignment_to_try.package_name)
+    
+    violated_clauses = [clause for clause in relevant_clauses if clause.truth_value(assignments_to_use) is False]
+    
+    return violated_clauses
+
+
+def _simplify_clause(clause : Clause) -> Clause:
+    terms = collections.defaultdict(list)
+
+    for term in clause:
+        terms[term.package_name].append(term)
+    
+    simplified_terms = []
+
+    for pkg_name, pkg_terms in terms.items():
+        if len(pkg_terms) > 1:
+            version = verpy.union(*[term.version_set for term in pkg_terms])
+            simplified_terms.append(Term(verpy.Requirement(pkg_name, version)))
+        else:
+            simplified_terms.append(pkg_terms[0])
+
+    return Clause(simplified_terms)
+
+
+def _simplify_term(term : Term, all_versions: typing.List[verpy.Version]) -> Term:
+    pass
+
+
+def report_error(state: SearchState):
+
+    root_clause = None
+    for clause in state.clauses:
+        if clause.truth_value([state.assignments[0]]) is False:
+            root_clause = clause
+            break
+
+    _dump_conflict(root_clause)
+    
+    raise SolverError()
+
+def _dump_conflict(clause):
+
+    print(clause, clause.cause)
+    if isinstance(clause.cause, ConflictCause):
+        for _clause in clause.cause.violated_clauses:
+            _dump_conflict(_clause)

@@ -1,5 +1,5 @@
 import verpy.version as vp
-import verpy.solver5 as solver
+import verpy.solver as solver
 
 import logging
 import pytest
@@ -170,29 +170,29 @@ def test_solver_4():
 
 def test_solver_5():
 
-    with pytest.raises(Exception):
-        repo = solver.DictRepository({
-            "foo": {
-                "1.0": [
-                    "bar 1.0"
-                ]
-            },
-            "bar": {
-                "2.0": [
-                    "foo 1.0"
-                ]
-            },
-            "baz": {
-                "1.0": []
-            }
-        })
+    # with pytest.raises(Exception):
+    repo = solver.DictRepository({
+        "foo": {
+            "1.0": [
+                "bar 1.0"
+            ]
+        },
+        "bar": {
+            "2.0": [
+                "foo 1.0"
+            ]
+        },
+        "baz": {
+            "1.0": []
+        }
+    })
 
-        result = solver.solve_dependencies(
-            root_dependencies=[
-                vp.requirement("bar >=1.0")
-            ],
-            package_repository=repo
-        )
+    result = solver.solve_dependencies(
+        root_dependencies=[
+            vp.requirement("bar >=1.0")
+        ],
+        package_repository=repo
+    )
 
         # print(result)
 
