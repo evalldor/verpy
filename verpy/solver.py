@@ -10,7 +10,6 @@ from . import version as verpy
 logger = logging.getLogger("solver")
 
 
-
 def unique_items(items):
     seen = []
 
@@ -18,19 +17,6 @@ def unique_items(items):
         if item not in seen:
             seen.append(item)
             yield item
-
-
-
-
-
-class NoAllowedVersionsCause:
-
-    def __init__(self, package_name, violated_clauses) -> None:
-        self.package_name = package_name
-        self.violated_clauses = violated_clauses
-
-    def __str__(self) -> str:
-        return f"NoAllowedVersions(package_name={self.package_name}, violated_clauses={self.violated_clauses})"
 
 
 class SolverError(Exception):
@@ -145,6 +131,9 @@ class RootAssignment(Assignment):
 
 
 class Term:
+    """A Term contains a statement (requirement) about a package. It is
+    evaluated to True when an assignment satisfies the requirement.
+    """
 
     def __init__(self, requirement, polarity=True) -> None:
         self.requirement = requirement
@@ -179,6 +168,9 @@ class Term:
 
 
 class Clause:
+    """A Clause is a disjuction of a set of Terms. It is evaluated to True when
+    at least one of the terms is True.
+    """
 
     def __init__(self, terms: typing.List[Term]) -> None:
         self.terms = terms
@@ -222,6 +214,7 @@ class Dependency(Clause):
         self.dependant = dependant
         self.dependency = dependency
 
+
 class Incompatibility(Clause):
 
     def __init__(self, package_name, violated_clauses) -> None:
@@ -230,21 +223,34 @@ class Incompatibility(Clause):
         self.package_name = package_name
         self.violated_clauses = violated_clauses
 
+
 class SearchState:
     """Used by the solver to hold relevant state during the search
     """
 
     def __init__(self, repo : PackageRepository) -> None:
         self.repo = repo
-        self.assignment_memory : typing.List[Assignment] = []
+        
+
+        # Contains the list of all clauses added during the search. The search
+        # is complete when all clauses in this list evaluates to True under the
+        # current list of assignments.
         self.clauses : typing.List[Clause] = []
+
+        # Contains the list of all current assignments (an assignment maps a
+        # package name to a version). It changes constantly during search, but
+        # when the search is complete, this list is the solution.
         self.assignments : typing.List[Assignment] = []
+
+        # Caches
+        self.loaded_dependencies : typing.List[Assignment] = []
+        self.available_versions : typing.Mapping[str, typing.List[verpy.Version]] = {}
 
     def add_root_dependencies(self, *requirements) -> None:
         root_assignment = RootAssignment()
 
         # This clause forces to root package to be selected. Otherwise the
-        # solver would simply unassign root and be done.
+        # solver would simply unassign root and call it quits.
         self.clauses.append(Clause([Term(root_assignment.as_requirement())]))
 
         self.assignments.append(root_assignment)
@@ -270,15 +276,18 @@ class SearchState:
         return None
 
     def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
-        if not isinstance(assignment, NullAssignment) and assignment not in self.assignment_memory:
-            self.assignment_memory.append(assignment)
+        if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
+            self.loaded_dependencies.append(assignment)
             dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
 
             for requirement in dependencies:
                 self.clauses.append(Dependency(assignment, requirement))
 
     def get_versions(self, package_name) -> typing.List[verpy.Version]:
-        return self.repo.get_versions(package_name)
+        if package_name not in self.available_versions:
+            self.available_versions[package_name] = self.repo.get_versions(package_name)
+
+        return self.available_versions[package_name]
     
     def get_dependants(self, package_name):
         dependants = []
@@ -417,8 +426,8 @@ def solve_dependencies(
             all_violated_clauses.extend(violated_clauses)
 
 
+        # Some debug printing
         clauses = [clause for clause in state.clauses if package_name in clause.get_package_names()]
-        
         logger.debug(f"\tRelevant clauses are:")
         for clause in clauses:
             logger.debug(f"\t\t{clause}")
