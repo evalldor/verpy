@@ -3,6 +3,7 @@ import collections
 import itertools
 import logging
 import typing
+from verpy.version.versioning import Version
 
 from . import version as verpy
 
@@ -19,25 +20,10 @@ def unique_items(items):
             yield item
 
 
-class Cause:
-    pass
 
 
-class DependencyCause(Cause):
-    
-    def __init__(self, dependant, dependency) -> None:
-        self.dependant = dependant
-        self.dependency = dependency
 
-    def __str__(self) -> str:
-        return f"Dependency({self.dependant} -> {self.dependency})"
-
-
-class ConflictCause(Cause):
-    pass
-
-
-class NoAllowedVersionsCause(ConflictCause):
+class NoAllowedVersionsCause:
 
     def __init__(self, package_name, violated_clauses) -> None:
         self.package_name = package_name
@@ -51,7 +37,7 @@ class SolverError(Exception):
     pass
 
 
-class Repository:
+class PackageRepository:
 
     def get_versions(self, package_name):
         raise NotImplementedError()
@@ -60,7 +46,7 @@ class Repository:
         raise NotImplementedError()
 
 
-class DictRepository(Repository):
+class DictRepository(PackageRepository):
 
     def __init__(self, contents) -> None:
         self.contents = {}
@@ -133,9 +119,6 @@ class Assignment:
     def as_requirement(self):
         return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version))
 
-    def as_complement_requirement(self):
-        return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version).complement())
-
     def __str__(self) -> str:
         return f"{self.package_name} {self.version}"
 
@@ -152,7 +135,7 @@ class Assignment:
 class NullAssignment(Assignment):
 
     def __init__(self, package_name: str) -> None:
-        super().__init__(package_name, verpy.Version("null"))
+        super().__init__(package_name, None)
 
 
 class RootAssignment(Assignment):
@@ -163,8 +146,9 @@ class RootAssignment(Assignment):
 
 class Term:
 
-    def __init__(self, requirement) -> None:
+    def __init__(self, requirement, polarity=True) -> None:
         self.requirement = requirement
+        self.polarity = polarity
 
     @property
     def package_name(self) -> str:
@@ -177,12 +161,18 @@ class Term:
     def truth_value(self, assignments) -> typing.Union[bool, None]:
         for assignment in assignments:
             if assignment.package_name == self.package_name:
-                return assignment.force or assignment.version in self.version_set
+                if self.polarity:
+                    return assignment.force or (not isinstance(assignment, NullAssignment) and assignment.version in self.version_set)
+                
+                return isinstance(assignment, NullAssignment) or assignment.version not in self.version_set
         
         return None
 
     def __str__(self) -> str:
-        return f"{self.requirement}"
+        if self.polarity:
+            return f"{self.requirement}"
+        
+        return f"not {self.requirement}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -190,29 +180,23 @@ class Term:
 
 class Clause:
 
-    def __init__(self, terms: typing.List[Term], cause: Cause = None) -> None:
+    def __init__(self, terms: typing.List[Term]) -> None:
         self.terms = terms
-        self.cause = cause
 
     def truth_value(self, assignments) -> typing.Union[bool, None]:
-        truth_values = [term.truth_value(assignments) for term in self.terms]
+        for term in self.terms:
+            truth_value = term.truth_value(assignments)
+            
+            if truth_value is True:
+                return True
 
-        if True in truth_values:
-            return True
-        
-        if None in truth_values:
-            return None
-        
+            if truth_value is None:
+                return None
+
         return False
 
     def get_package_names(self) -> typing.List[str]:
-        package_names = []
-
-        for term in self.terms:
-            if term.package_name not in package_names:
-                package_names.append(term.package_name)
-
-        return package_names
+        return list(unique_items([term.package_name for term in self.terms]))
 
     def __len__(self) -> int:
         return len(self.terms)
@@ -231,36 +215,26 @@ class Clause:
 class Dependency(Clause):
 
     def __init__(self, dependant: Assignment, dependency: verpy.Requirement) -> None:
-        super().__init__(
-            terms=[Term(dependant.as_complement_requirement()), Term(dependency)], 
-            cause=DependencyCause(dependant, dependency)
-        )
+        super().__init__([Term(dependant.as_requirement(), polarity=False), Term(dependency)])
 
         # These are stored here as shorthands to simplify dependency/dependant
         # lookups
         self.dependant = dependant
         self.dependency = dependency
 
-    
-    def truth_value(self, assignments) -> typing.Union[bool, None]:
-        if self.dependant in assignments:
-            dependant_assignment = assignments[assignments.index(self.dependant)]
+class Incompatibility(Clause):
 
-            if dependant_assignment.force:
-                for assignment in assignments:
-                    if assignment.package_name == self.package_name:
-                        return assignment.version in self.version_set
-                
-                return None
+    def __init__(self, package_name, violated_clauses) -> None:
+        super().__init__([term for term in unique_items(itertools.chain(*violated_clauses)) if term.package_name != package_name])
 
-        return super().truth_value(assignments)
-
+        self.package_name = package_name
+        self.violated_clauses = violated_clauses
 
 class SearchState:
     """Used by the solver to hold relevant state during the search
     """
 
-    def __init__(self, repo) -> None:
+    def __init__(self, repo : PackageRepository) -> None:
         self.repo = repo
         self.assignment_memory : typing.List[Assignment] = []
         self.clauses : typing.List[Clause] = []
@@ -309,9 +283,8 @@ class SearchState:
     def get_dependants(self, package_name):
         dependants = []
         for clause in self.clauses:
-            if isinstance(clause, Dependency) and clause.dependency.package_name == package_name:
-                if clause.dependant in self.assignments:
-                    dependants.append(clause.dependant)
+            if isinstance(clause, Dependency) and clause.dependant in self.assignments and clause.dependency.package_name == package_name:
+                dependants.append(clause.dependant)
         
         return dependants
 
@@ -343,7 +316,12 @@ class SearchState:
             self.assignments.remove(assignment)
 
     def solution_is_complete(self) -> bool:
-        return all([clause.truth_value(self.assignments) for clause in self.clauses])
+
+        for clause in self.clauses:
+            if not clause.truth_value(self.assignments):
+                return False
+        
+        return True
 
     def get_deepest_assignment_involving(self, package_names):
         deepest = None
@@ -362,10 +340,10 @@ class SearchState:
         
         for clause in self.clauses:
             for package_name in clause.get_package_names():
-                if not self.has_assignment(package_name) and package_name not in package_names:
+                if not self.has_assignment(package_name):
                     package_names.append(package_name)
 
-        return package_names
+        return list(unique_items(package_names))
 
     def get_current_solution(self):
         solution = {}
@@ -384,11 +362,14 @@ class SearchState:
         return False
 
 
-def solve_dependencies(root_dependencies, package_repository, version_selection_strategy=None):
+def solve_dependencies(
+    root_dependencies: typing.List[verpy.Requirement], 
+    package_repository: PackageRepository, 
+    version_selection_strategy: VersionSelectionStrategy = None
+):
+
     # TODO: 
     # * Error reporting
-    # * Null version
-    # * Incompatibility
 
     if version_selection_strategy is None:
         version_selection_strategy = DefaultVersionSelectionStrategy()
@@ -414,6 +395,9 @@ def solve_dependencies(root_dependencies, package_repository, version_selection_
         all_versions = state.get_versions(package_name)
         logger.debug(f"\tAvailable versions are: {all_versions}:")
 
+        # Try assigning a version to the package and see if that violates any
+        # clauses. If if does, we move on to the next version etc. The order
+        # that the versions are tried is determined by the version_selection_strategy
 
         all_violated_clauses = []
         assignment_to_make = None
@@ -442,9 +426,7 @@ def solve_dependencies(root_dependencies, package_repository, version_selection_
 
         if assignment_to_make is None:
             # We have a conflict
-            terms = [term for term in unique_items(itertools.chain(*all_violated_clauses)) if term.package_name != package_name]
-
-            incompatibility = Clause(terms, NoAllowedVersionsCause(package_name, violated_clauses))
+            incompatibility = Incompatibility(package_name, unique_items(all_violated_clauses))
 
             logger.debug(f"\tConflict: no allowed versions! Created incompatibility {incompatibility}.")
             
@@ -496,7 +478,7 @@ def report_error(state: SearchState):
 
 def _dump_conflict(clause):
 
-    print(clause, clause.cause)
-    if isinstance(clause.cause, ConflictCause):
-        for _clause in clause.cause.violated_clauses:
+    print(clause)
+    if isinstance(clause, Incompatibility):
+        for _clause in clause.violated_clauses:
             _dump_conflict(_clause)
