@@ -1,5 +1,5 @@
+import sys
 import collections
-import copy
 import itertools
 import logging
 import typing
@@ -8,7 +8,15 @@ from . import version as verpy
 
 logger = logging.getLogger("solver")
 
-NULL_VERSION = verpy.Version("null")
+
+
+def unique_items(items):
+    seen = []
+
+    for item in items:
+        if item not in seen:
+            seen.append(item)
+            yield item
 
 
 class Cause:
@@ -63,17 +71,64 @@ class DictRepository(Repository):
                 self.contents[pkg_name][verpy.version(version)] = [verpy.requirement(req) for req in requirements]
 
     def get_versions(self, package_name):
-        return sorted(self.contents[package_name].keys(), reverse=True) # Latest version first
+        return list(self.contents[package_name].keys())
 
     def get_dependencies(self, package_name, package_version):
         return list(self.contents[package_name][package_version])
 
 
+class VersionSelectionStrategy:
+    
+    def get_prioritized_assignments(self, state, package_name):
+        raise NotImplementedError()
+
+
+class DefaultVersionSelectionStrategy(VersionSelectionStrategy):
+
+    def get_prioritized_assignments(self, state, package_name):
+        return [Assignment(package_name, version) for version in sorted(state.get_versions(package_name), reverse=True)]
+
+
+class MavenVersionSelectionStrategy(VersionSelectionStrategy):
+
+    def get_prioritized_assignments(self, state, package_name):
+        # Chooses the highest version allowed by the requirement found closest
+        # to root
+
+        all_dependants = state.get_dependants(package_name)
+
+
+        topmost_dependant = None    
+        topmost_depth = sys.maxsize
+
+        for dependant in all_dependants:
+            depth = state.get_assignment_depth(dependant)
+
+            if depth < topmost_depth:
+                topmost_depth = depth
+                topmost_dependant = dependant
+
+        all_versions = sorted(state.get_versions(package_name), reverse=True)
+        version_to_use = None
+        for clause in state.clauses:
+            if isinstance(clause, Dependency) and clause.dependant == topmost_dependant and clause.dependency.package_name == package_name:
+                for version in all_versions:
+                    if version in clause.dependency:
+                        version_to_use = version
+                        break
+
+        if version_to_use is None:
+            return []
+
+        return Assignment(package_name, version_to_use, force=True)
+
+
 class Assignment:
 
-    def __init__(self, package_name: str, version: verpy.Version) -> None:
+    def __init__(self, package_name: str, version: verpy.Version, force: bool = False) -> None:
         self.package_name = package_name
         self.version = version
+        self.force = force
 
     def as_requirement(self):
         return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version))
@@ -97,7 +152,7 @@ class Assignment:
 class NullAssignment(Assignment):
 
     def __init__(self, package_name: str) -> None:
-        super().__init__(package_name, NULL_VERSION)
+        super().__init__(package_name, verpy.Version("null"))
 
 
 class RootAssignment(Assignment):
@@ -122,7 +177,7 @@ class Term:
     def truth_value(self, assignments) -> typing.Union[bool, None]:
         for assignment in assignments:
             if assignment.package_name == self.package_name:
-                return assignment.version in self.version_set
+                return assignment.force or assignment.version in self.version_set
         
         return None
 
@@ -139,7 +194,7 @@ class Clause:
         self.terms = terms
         self.cause = cause
 
-    def truth_value(self, assignments) -> bool:
+    def truth_value(self, assignments) -> typing.Union[bool, None]:
         truth_values = [term.truth_value(assignments) for term in self.terms]
 
         if True in truth_values:
@@ -186,6 +241,20 @@ class Dependency(Clause):
         self.dependant = dependant
         self.dependency = dependency
 
+    
+    def truth_value(self, assignments) -> typing.Union[bool, None]:
+        if self.dependant in assignments:
+            dependant_assignment = assignments[assignments.index(self.dependant)]
+
+            if dependant_assignment.force:
+                for assignment in assignments:
+                    if assignment.package_name == self.package_name:
+                        return assignment.version in self.version_set
+                
+                return None
+
+        return super().truth_value(assignments)
+
 
 class SearchState:
     """Used by the solver to hold relevant state during the search
@@ -203,7 +272,6 @@ class SearchState:
         # This clause forces to root package to be selected. Otherwise the
         # solver would simply unassign root and be done.
         self.clauses.append(Clause([Term(root_assignment.as_requirement())]))
-
 
         self.assignments.append(root_assignment)
 
@@ -228,7 +296,7 @@ class SearchState:
         return None
 
     def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
-        if assignment.version != NULL_VERSION and assignment not in self.assignment_memory:
+        if not isinstance(assignment, NullAssignment) and assignment not in self.assignment_memory:
             self.assignment_memory.append(assignment)
             dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
 
@@ -238,10 +306,10 @@ class SearchState:
     def get_versions(self, package_name) -> typing.List[verpy.Version]:
         return self.repo.get_versions(package_name)
     
-    def get_dependants(self, assignment):
+    def get_dependants(self, package_name):
         dependants = []
         for clause in self.clauses:
-            if isinstance(clause, Dependency) and clause.dependency.package_name == assignment.package_name:
+            if isinstance(clause, Dependency) and clause.dependency.package_name == package_name:
                 if clause.dependant in self.assignments:
                     dependants.append(clause.dependant)
         
@@ -259,13 +327,13 @@ class SearchState:
         if isinstance(assignment, RootAssignment):
             return 0
         
-        dependant_assignments = self.get_dependants(assignment)
+        dependant_assignments = self.get_dependants(assignment.package_name)
         depths = [self.get_assignment_depth(dependant)+1 for dependant in dependant_assignments]
 
         return min(depths)
 
     def backtrack(self, assignment) -> None:
-        # Remove assignment and all assignments that depend on this assignment
+        # Remove assignment and assignments for all dependencies
         dependencies = self.get_dependencies_assignments(assignment)
     
         for dependency in dependencies:
@@ -276,15 +344,6 @@ class SearchState:
 
     def solution_is_complete(self) -> bool:
         return all([clause.truth_value(self.assignments) for clause in self.clauses])
-
-    def get_all_clauses_involving_package(self, package_name) -> typing.List[Clause]:
-        clauses = []
-        
-        for clause in self.clauses:
-            if package_name in clause.get_package_names():
-                clauses.append(clause)
-
-        return clauses
 
     def get_deepest_assignment_involving(self, package_names):
         deepest = None
@@ -308,20 +367,11 @@ class SearchState:
 
         return package_names
 
-    def get_unsatisfied_clauses(self):
-        unsatisfied_clauses = []        
-        
-        for clause in self.clauses:
-            if clause.truth_value(self.assignments) is False:
-                unsatisfied_clauses.append(clause)
-
-        return unsatisfied_clauses
-
     def get_current_solution(self):
         solution = {}
 
         for assignment in self.assignments:
-            if not isinstance(assignment, RootAssignment) and assignment.version != NULL_VERSION:
+            if not isinstance(assignment, (RootAssignment, NullAssignment)):
                 solution[assignment.package_name] = str(assignment.version)
 
         return solution
@@ -334,12 +384,14 @@ class SearchState:
         return False
 
 
-def solve_dependencies(root_dependencies, package_repository):
+def solve_dependencies(root_dependencies, package_repository, version_selection_strategy=None):
     # TODO: 
-    # * Version selection strategies
     # * Error reporting
-    # * Forced assignments
-    
+    # * Null version
+    # * Incompatibility
+
+    if version_selection_strategy is None:
+        version_selection_strategy = DefaultVersionSelectionStrategy()
 
     state = SearchState(package_repository)
 
@@ -366,34 +418,31 @@ def solve_dependencies(root_dependencies, package_repository):
         all_violated_clauses = []
         assignment_to_make = None
 
-        for version in [NULL_VERSION, *all_versions]:
-            assignment_to_try = Assignment(package_name, version)
+        for assignment_to_try in [NullAssignment(package_name), *version_selection_strategy.get_prioritized_assignments(state, package_name)]:
+            
+            state.load_dependencies(assignment_to_try)
+    
+            assignments = [assignment_to_try] + state.assignments
 
-            violated_clauses = try_assignment(state, assignment_to_try)
+            violated_clauses = [clause for clause in state.clauses if clause.truth_value(assignments) is False]
             
             if len(violated_clauses) == 0:
                 assignment_to_make = assignment_to_try
                 break
             
-            for clause in violated_clauses:
-                if clause not in all_violated_clauses:
-                    all_violated_clauses.append(clause)
+            all_violated_clauses.extend(violated_clauses)
 
 
-        clauses = state.get_all_clauses_involving_package(package_name)
+        clauses = [clause for clause in state.clauses if package_name in clause.get_package_names()]
+        
         logger.debug(f"\tRelevant clauses are:")
         for clause in clauses:
             logger.debug(f"\t\t{clause}")
 
 
-
         if assignment_to_make is None:
             # We have a conflict
-            terms = []
-
-            for term in itertools.chain(*all_violated_clauses):
-                if term.package_name != package_name:
-                    terms.append(term)
+            terms = [term for term in unique_items(itertools.chain(*all_violated_clauses)) if term.package_name != package_name]
 
             incompatibility = Clause(terms, NoAllowedVersionsCause(package_name, violated_clauses))
 
@@ -409,19 +458,6 @@ def solve_dependencies(root_dependencies, package_repository):
 
 
     return state.get_current_solution()
-
-
-def try_assignment(state: SearchState, assignment_to_try: Assignment):
-    
-    state.load_dependencies(assignment_to_try)
-    
-    assignments_to_use = [assignment_to_try] + state.assignments
-
-    relevant_clauses = state.get_all_clauses_involving_package(assignment_to_try.package_name)
-    
-    violated_clauses = [clause for clause in relevant_clauses if clause.truth_value(assignments_to_use) is False]
-    
-    return violated_clauses
 
 
 def _simplify_clause(clause : Clause) -> Clause:
