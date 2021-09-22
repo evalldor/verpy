@@ -8,6 +8,8 @@ from . import version as verpy
 
 logger = logging.getLogger("solver")
 
+NULL_VERSION = verpy.Version("null")
+
 
 class Cause:
     pass
@@ -92,6 +94,12 @@ class Assignment:
         return hash(self) == hash(other)
 
 
+class NullAssignment(Assignment):
+
+    def __init__(self, package_name: str) -> None:
+        super().__init__(package_name, NULL_VERSION)
+
+
 class RootAssignment(Assignment):
 
     def __init__(self) -> None:
@@ -127,7 +135,7 @@ class Term:
 
 class Clause:
 
-    def __init__(self, terms: typing.List[Term], cause: Cause=None) -> None:
+    def __init__(self, terms: typing.List[Term], cause: Cause = None) -> None:
         self.terms = terms
         self.cause = cause
 
@@ -173,7 +181,8 @@ class Dependency(Clause):
             cause=DependencyCause(dependant, dependency)
         )
 
-        # These are stored here as shorthands to simplify error reporting
+        # These are stored here as shorthands to simplify dependency/dependant
+        # lookups
         self.dependant = dependant
         self.dependency = dependency
 
@@ -219,7 +228,7 @@ class SearchState:
         return None
 
     def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
-        if assignment.version != verpy.Version("none") and assignment not in self.assignment_memory:
+        if assignment.version != NULL_VERSION and assignment not in self.assignment_memory:
             self.assignment_memory.append(assignment)
             dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
 
@@ -256,8 +265,7 @@ class SearchState:
         return min(depths)
 
     def backtrack(self, assignment) -> None:
-        
-        # Remove all assignments that depend on this assignment
+        # Remove assignment and all assignments that depend on this assignment
         dependencies = self.get_dependencies_assignments(assignment)
     
         for dependency in dependencies:
@@ -313,7 +321,7 @@ class SearchState:
         solution = {}
 
         for assignment in self.assignments:
-            if not isinstance(assignment, RootAssignment) and assignment.version != verpy.Version("none"):
+            if not isinstance(assignment, RootAssignment) and assignment.version != NULL_VERSION:
                 solution[assignment.package_name] = str(assignment.version)
 
         return solution
@@ -325,10 +333,12 @@ class SearchState:
 
         return False
 
+
 def solve_dependencies(root_dependencies, package_repository):
     # TODO: 
     # * Version selection strategies
     # * Error reporting
+    # * Forced assignments
     
 
     state = SearchState(package_repository)
@@ -354,15 +364,15 @@ def solve_dependencies(root_dependencies, package_repository):
 
 
         all_violated_clauses = []
-        version_to_assign = None
+        assignment_to_make = None
 
-        for version in [verpy.Version("none"), *all_versions]:
+        for version in [NULL_VERSION, *all_versions]:
             assignment_to_try = Assignment(package_name, version)
 
             violated_clauses = try_assignment(state, assignment_to_try)
             
             if len(violated_clauses) == 0:
-                version_to_assign = version
+                assignment_to_make = assignment_to_try
                 break
             
             for clause in violated_clauses:
@@ -377,14 +387,13 @@ def solve_dependencies(root_dependencies, package_repository):
 
 
 
-        if version_to_assign is None:
+        if assignment_to_make is None:
             # We have a conflict
             terms = []
 
-            for clause in all_violated_clauses:
-                for term in clause:
-                    if term.package_name != package_name:
-                        terms.append(term)
+            for term in itertools.chain(*all_violated_clauses):
+                if term.package_name != package_name:
+                    terms.append(term)
 
             incompatibility = Clause(terms, NoAllowedVersionsCause(package_name, violated_clauses))
 
@@ -395,8 +404,8 @@ def solve_dependencies(root_dependencies, package_repository):
             state.backtrack(state.get_deepest_assignment_involving(incompatibility.get_package_names()))
 
         else:
-            logger.debug(f"\tAssigning version {version_to_assign} to {package_name}.")
-            state.add_assignment(Assignment(package_name, version_to_assign))
+            logger.debug(f"\tAssigning version {assignment_to_make.version} to {package_name}.")
+            state.add_assignment(assignment_to_make)
 
 
     return state.get_current_solution()
@@ -406,8 +415,7 @@ def try_assignment(state: SearchState, assignment_to_try: Assignment):
     
     state.load_dependencies(assignment_to_try)
     
-    assignments_to_use = [ass for ass in state.assignments if ass.package_name != assignment_to_try.package_name]
-    assignments_to_use.append(assignment_to_try)
+    assignments_to_use = [assignment_to_try] + state.assignments
 
     relevant_clauses = state.get_all_clauses_involving_package(assignment_to_try.package_name)
     
