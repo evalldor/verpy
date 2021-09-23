@@ -19,7 +19,11 @@ def unique_items(items):
 
 
 class SolverError(Exception):
-    pass
+    
+    def __init__(self, package_name, conflicting_requirements, root_requirements_involved) -> None:
+        self.package_name = package_name
+        self.conflicting_requirements = conflicting_requirements
+        self.root_requirements_involved = root_requirements_involved
 
 
 class PackageRepository:
@@ -91,7 +95,7 @@ class MavenVersionSelectionStrategy(VersionSelectionStrategy):
         if version_to_use is None:
             return []
 
-        return Assignment(package_name, version_to_use, force=True)
+        return [Assignment(package_name, version_to_use, force=True)]
 
 
 class Assignment:
@@ -257,14 +261,11 @@ class SearchState:
         self.load_dependencies(assignment)
 
     def has_assignment(self, package_name) -> bool:
-        return self.get_assignment(package_name) != None
-
-    def get_assignment(self, package_name) -> Assignment:
         for assignment in self.assignments:
             if assignment.package_name == package_name:
-                return assignment
+                return True
         
-        return None
+        return False
 
     def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
         if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
@@ -315,16 +316,10 @@ class SearchState:
         if not isinstance(assignment, RootAssignment):
             self.assignments.remove(assignment)
 
-    def is_solution_complete(self) -> bool:
-        for clause in self.clauses:
-            if not clause.truth_value(self.assignments):
-                return False
-        
-        return True
-
     def get_deepest_assignment_involving(self, package_names):
         deepest = None
         max_depth = -1
+ 
         for assignment in self.assignments:
             if assignment.package_name in package_names:
                 depth = self.get_assignment_depth(assignment)
@@ -335,13 +330,14 @@ class SearchState:
         return deepest
 
     def get_unassigned_packages(self):
-        package_names = []
+        assigned_package_names = [a.package_name for a in self.assignments]
+        unassigned_package_names = []
         
         for package_name in unique_items(itertools.chain(*[clause.get_package_names() for clause in self.clauses])):
-            if not self.has_assignment(package_name):
-                package_names.append(package_name)
+            if package_name not in assigned_package_names:
+                unassigned_package_names.append(package_name)
 
-        return package_names
+        return unassigned_package_names
 
     def get_current_solution(self):
         solution = {}
@@ -351,6 +347,13 @@ class SearchState:
                 solution[assignment.package_name] = str(assignment.version)
 
         return solution
+    
+    def is_solution_complete(self) -> bool:
+        for clause in self.clauses:
+            if not clause.truth_value(self.assignments):
+                return False
+        
+        return True
 
     def has_failed(self):
         for clause in self.clauses:
@@ -477,13 +480,30 @@ def report_error(state: SearchState):
     
     root_clause = find_root_cause(root_incompatibility)
     
+    package_name = root_clause.package_name
+    conflicting_requirements = []
     
-    print(f"Unable to find a matching version for package '{root_clause.package_name}' because:")
-    dependency_strings = [f"{clause.dependant} depends on {clause.dependency}" for clause in root_clause.violated_clauses]
-    print("\t" + " and \n\t".join(dependency_strings))
-    print(f"which are mutually incompatible requirements!")
+    for clause in root_clause.violated_clauses:
+        conflicting_requirements.append(clause)
 
-    raise SolverError()
+    root_requirements_involved = []
+
+    for clause in root_incompatibility.violated_clauses:
+        for term in clause:
+            if term.package_name != "__root__":
+                root_requirements_involved.append(term.requirement)
+    
+
+    # print(f"Unable to find a matching version for package '{root_clause.package_name}' because:")
+    # dependency_strings = [f"{clause.dependant} requires {clause.dependency}" for clause in root_clause.violated_clauses]
+    # print("\t" + " and \n\t".join(dependency_strings))
+    # print(f"which are mutually incompatible requirements!")
+
+    raise SolverError(
+        package_name=package_name,
+        conflicting_requirements=conflicting_requirements,
+        root_requirements_involved=root_requirements_involved
+    )
 
 
 def find_root_cause(clause):

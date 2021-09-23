@@ -53,7 +53,8 @@ def as_set(specifier):
         specifier (str): The version set string to parse
 
     Raises:
-        ValueError: If the input is not an instance of str, :class:`Version` or :class:`VersionSet`.
+        ValueError: If the input is not an instance of str, :class:`Version` or 
+        :class:`VersionSet`.
 
     Returns:
         :class:`VersionSet`: A set of versions.
@@ -71,7 +72,8 @@ def as_set(specifier):
 
 def as_requirement(requirement):
     """Parses the given string into a :class:`Requirement` instance. A
-    requirement consists of a package name and an allowed version set. E.g. ``verpy >= 1.5.0``
+    requirement consists of a package name and an allowed version set. E.g.
+    ``verpy >=1.5.0``
 
     Args:
         requirement (str): The string to parse
@@ -132,10 +134,13 @@ string_version_orderings = {
     "m": 2,
     "rc": 3,
     "cr": 3,
+    "c": 3,
     "": 4,
     "snapshot": 5,
+    "dev": 5,
     "final": 6,
     "ga": 6,
+    "post": 7,
     "sp": 7
 }
 
@@ -213,6 +218,7 @@ class NumericComponent:
     def __hash__(self):
         return hash(self.normalized_representation())
 
+
 class StringComponent:
     def __init__(self, string):
         self._item = str(string).strip(".")
@@ -227,12 +233,15 @@ class StringComponent:
     def __repr__(self):
         return str(self)
 
+
 class NullComponent:
     pass
+
 
 GREATER = 1
 LESSER = -1
 EQUAL = 0
+
 
 def compare_versions(a_components, b_components):
 
@@ -312,6 +321,7 @@ def compare_version_components(a, b):
         return EQUAL
 
     raise Exception("Unknown components types")
+
 
 def compare_component_with_null(a):
 
@@ -398,10 +408,6 @@ class VersionSet:
     def lt(version):
         return LtSpecifier(as_version(version))
     
-    # @staticmethod
-    # def any():
-    #     return AnySpecifier()
-    
     @staticmethod
     def none():
         return NoneSpecifier()
@@ -415,6 +421,9 @@ class VersionSet:
     
     @staticmethod
     def any(*specifiers):
+        if len(specifiers) == 0:
+            return AnySpecifier()
+
         if len(specifiers) == 1:
             return as_set(specifiers[0])
             
@@ -430,7 +439,7 @@ class NoneSpecifier(VersionSet):
         return False
 
     def __str__(self):
-        return "None"
+        return "none"
 
     def __repr__(self):
         return str(self)
@@ -441,7 +450,7 @@ class AnySpecifier(VersionSet):
         return True
 
     def __str__(self):
-        return "Any"
+        return "any"
 
     def __repr__(self):
         return str(self)
@@ -656,7 +665,7 @@ LT = Literal("<")
 GTEQ = Literal(">=")
 LTEQ = Literal("<=")
 
-VERSION_STRING = Word(alphanums+".-")
+VERSION_STRING = Word(alphanums+".-+")
 
 def parse_specifier(tokens):
     op, version = tokens
