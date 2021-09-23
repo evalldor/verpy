@@ -23,6 +23,7 @@ from pyparsing import (
     ungroup
 )
 
+
 def as_version(version):
     """Takes a string and parses it into a :class:`Version` instance. The input
     is also allowed to be an instance of :class:`Version`, in which case it is
@@ -42,6 +43,7 @@ def as_version(version):
         return Version(version)
 
     raise ValueError(f"Invalid version type '{type(version)}'.")
+
 
 def as_set(specifier):
     """Parses the provided string into a :class:`VersionSet` instance. If the is
@@ -70,6 +72,7 @@ def as_set(specifier):
     
     raise ValueError(f"Invalid set type '{type(specifier)}'.")
 
+
 def as_requirement(requirement):
     """Parses the given string into a :class:`Requirement` instance. A
     requirement consists of a package name and an allowed version set. E.g.
@@ -92,6 +95,11 @@ def as_requirement(requirement):
 
     raise ValueError(f"Invalid requirement type '{type(requirement)}'.")
 
+
+def as_python_requirement(requirement):
+    pass
+
+
 def as_maven_set(specifier):
     if isinstance(specifier, VersionSet):
         return specifier
@@ -104,11 +112,15 @@ def as_maven_set(specifier):
     
     raise ValueError(f"Invalid set type '{type(specifier)}'.")
 
+
 def intersection_of(*sets):
     return VersionSet.all(*[as_set(s) for s in sets])
 
+
 def union_of(*sets):
     return VersionSet.any(*[as_set(s) for s in sets])
+
+
 #
 # Version parsing
 #
@@ -123,7 +135,7 @@ SEPARATOR = Literal("-").suppress()
 SECTION = COMPONENT ^ SEPARATOR
 PREFIX = Optional(CaselessLiteral("v") ^ CaselessLiteral("ver") ^ CaselessLiteral("version")).suppress()
 
-VERSION_PATTERN = PREFIX + SECTION + ZeroOrMore(SECTION)
+VERSION_PATTERN = PREFIX + OneOrMore(SECTION)
 
 string_version_orderings = {
     "alpha": 0,
@@ -143,6 +155,7 @@ string_version_orderings = {
     "post": 7,
     "sp": 7
 }
+
 
 class Version:
 
@@ -193,6 +206,7 @@ class Version:
 
     def __hash__(self):
         return hash(self._norm_repr())
+
 
 class NumericComponent:
     def __init__(self, num_string):
@@ -259,6 +273,7 @@ def compare_versions(a_components, b_components):
             return c
 
     return EQUAL
+
 
 def compare_version_components(a, b):
 
@@ -655,8 +670,8 @@ class NotOperator(VersionSet):
 # Set parsing
 #
 
-AND = Literal("&")
-OR = Literal("|")
+AND = Literal("&") ^ Literal(",") ^ Literal("and")
+OR = Literal("|") ^ Literal("or")
 NOT = Literal("!")
 EQ = Literal("==") #^ Literal("=")
 NEQ = Literal("!=")
@@ -666,6 +681,7 @@ GTEQ = Literal(">=")
 LTEQ = Literal("<=")
 
 VERSION_STRING = Word(alphanums+".-+")
+
 
 def parse_specifier(tokens):
     op, version = tokens
@@ -690,16 +706,18 @@ def parse_specifier(tokens):
     
     raise Exception(f"Unkown version specifier {op}")
 
+
 SPECIFIER = ((EQ ^ NEQ ^ GT ^ LT ^ GTEQ ^ LTEQ ^ Empty().setParseAction(lambda x: "==")) + VERSION_STRING).setParseAction(parse_specifier)
+
 
 def parse_not(tokens):
     return VersionSet.invert(tokens[0][1])
 
 def parse_and(tokens):
-    return VersionSet.all(*filter(lambda x: x != "&", tokens[0]))
+    return VersionSet.all(*filter(lambda x: x not in ["&", ",", "and"], tokens[0]))
 
 def parse_or(tokens):
-    return VersionSet.any(*filter(lambda x: x != "|", tokens[0]))
+    return VersionSet.any(*filter(lambda x: x not in ["|", "or"], tokens[0]))
 
 TERM = ungroup(infixNotation(
     SPECIFIER,
@@ -757,11 +775,11 @@ CLOSE_RANGE = (Literal(")") ^ Literal("]")).setResultsName("include_max").setPar
 
 VERSION_RANGE = Group(OPEN_RANGE + MIN_VERSION + Literal(",").suppress() + MAX_VERSION + CLOSE_RANGE)
 
-VERSION_SET = delimitedList(Group(VERSION_STRING.setResultsName("version") ^ VERSION_RANGE.setResultsName("range")))
+MAVEN_VERSION_SET = delimitedList(Group(VERSION_STRING.setResultsName("version") ^ VERSION_RANGE.setResultsName("range")))
 
 
 def parse_maven_version_set(requirement_string):
-    result = VERSION_SET.parseString(requirement_string, parseAll=True)
+    result = MAVEN_VERSION_SET.parseString(requirement_string, parseAll=True)
 
     specifiers = []
 

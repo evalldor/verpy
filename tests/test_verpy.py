@@ -12,11 +12,13 @@ def test_versions():
     assert vp.version("v2.1.0-M1") < vp.version("Ver2.1.0")    
     assert vp.version("1.0-SNAPSHOT") == vp.version("1-SNAPSHOT")
     assert hash(vp.version("1.0-SNAPSHOT")) == hash(vp.version("1-SNAPSHOT"))
+
     
     rng = vp.maven_set("(1.0-SNAPSHOT,], 2.0-alpha-1, (2.0-alpha1, 2.0-alpha-2)")
     print(rng)
 
 def test_version_sets():
+
     vset = vp.set(">=1.0")
     assert vset.contains("1.0")
     assert not vset.contains("0.9")
@@ -43,8 +45,24 @@ def test_version_sets():
     assert not "3.0" in vset
 
 
-    vset = vp.set(">= 1.0 | 3.0")
-    print(vset)
+    vset = vp.set("<= 1.0 | >3.0")
+    assert "1.0" in vset
+    assert "2.0" not in vset
+
+    vset = vp.set("<= 1.0 or >3.0")
+    assert "1.0" in vset
+    assert "2.0" not in vset
+
+    vset = vp.set("(>=1.0, <3.0)")
+    assert "2.0" in vset
+
+    vset = vp.set(">=1.0 and <3.0")
+    assert "2.0" in vset
+
+    vset = vp.set("!(<= 1.0 or >3.0)")
+    assert "1.0" not in vset
+    assert "2.0" in vset
+    
 
 def test_requiremen():
 

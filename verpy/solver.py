@@ -28,7 +28,7 @@ class SolverError(Exception):
 
 class PackageRepository:
 
-    def get_versions(self, package_name):
+    def get_versions(self, package_name) -> typing.List[verpy.Version]:
         raise NotImplementedError()
 
     def get_dependencies(self, package_name, package_version) -> typing.List[verpy.Requirement]:
