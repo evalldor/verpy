@@ -466,19 +466,34 @@ def _simplify_term(term : Term, all_versions: typing.List[verpy.Version]) -> Ter
 
 def report_error(state: SearchState):
 
-    root_clause = None
+    # Find incompatibility that has only Dependencies as its cause. This is the
+    # root if the conflict.
+
+    root_incompatibility = None
     for clause in state.clauses:
         if clause.truth_value([state.assignments[0]]) is False:
-            root_clause = clause
+            root_incompatibility = clause
             break
-
-    _dump_conflict(root_clause)
     
+    root_clause = find_root_cause(root_incompatibility)
+    
+    
+    print(f"Unable to find a matching version for package '{root_clause.package_name}' because:")
+    dependency_strings = [f"{clause.dependant} depends on {clause.dependency}" for clause in root_clause.violated_clauses]
+    print("\t" + " and \n\t".join(dependency_strings))
+    print(f"which are mutually incompatible requirements!")
+
     raise SolverError()
 
-def _dump_conflict(clause):
 
-    print(clause)
+def find_root_cause(clause):
     if isinstance(clause, Incompatibility):
-        for _clause in clause.violated_clauses:
-            _dump_conflict(_clause)
+        results = [find_root_cause(c) for c in clause.violated_clauses]
+        for result in results:
+            if result is not False:
+                return result
+
+        return clause
+
+
+    return False
