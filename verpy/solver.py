@@ -3,7 +3,6 @@ import collections
 import itertools
 import logging
 import typing
-from verpy.version.versioning import Version
 
 from . import version as verpy
 
@@ -67,7 +66,7 @@ class MavenVersionSelectionStrategy(VersionSelectionStrategy):
         # Chooses the highest version allowed by the requirement found closest
         # to root
 
-        all_dependants = state.get_dependants(package_name)
+        all_dependants = state.get_dependant_assignments(package_name)
 
 
         topmost_dependant = None    
@@ -231,7 +230,6 @@ class SearchState:
     def __init__(self, repo : PackageRepository) -> None:
         self.repo = repo
         
-
         # Contains the list of all clauses added during the search. The search
         # is complete when all clauses in this list evaluates to True under the
         # current list of assignments.
@@ -249,26 +247,19 @@ class SearchState:
     def add_root_dependencies(self, *requirements) -> None:
         root_assignment = RootAssignment()
 
-        # This clause forces to root package to be selected. Otherwise the
-        # solver would simply unassign root and call it quits.
-        self.clauses.append(Clause([Term(root_assignment.as_requirement())]))
-
         self.assignments.append(root_assignment)
 
         for requirement in requirements:
             self.clauses.append(Dependency(root_assignment, requirement))
 
     def add_assignment(self, assignment) -> None:
-        assert not self.has_assignment(assignment.package_name)
-
         self.assignments.append(assignment)
-        
         self.load_dependencies(assignment)
 
     def has_assignment(self, package_name) -> bool:
         return self.get_assignment(package_name) != None
 
-    def get_assignment(self, package_name) -> bool:
+    def get_assignment(self, package_name) -> Assignment:
         for assignment in self.assignments:
             if assignment.package_name == package_name:
                 return assignment
@@ -289,7 +280,7 @@ class SearchState:
 
         return self.available_versions[package_name]
     
-    def get_dependants(self, package_name):
+    def get_dependant_assignments(self, package_name):
         dependants = []
         for clause in self.clauses:
             if isinstance(clause, Dependency) and clause.dependant in self.assignments and clause.dependency.package_name == package_name:
@@ -297,7 +288,7 @@ class SearchState:
         
         return dependants
 
-    def get_dependencies_assignments(self, assignment):
+    def get_dependency_assignments(self, assignment):
         dependency = []
         for clause in self.clauses:
             if isinstance(clause, Dependency) and clause.dependant == assignment and clause.dependency in self.assignments:
@@ -309,14 +300,14 @@ class SearchState:
         if isinstance(assignment, RootAssignment):
             return 0
         
-        dependant_assignments = self.get_dependants(assignment.package_name)
+        dependant_assignments = self.get_dependant_assignments(assignment.package_name)
         depths = [self.get_assignment_depth(dependant)+1 for dependant in dependant_assignments]
 
         return min(depths)
 
     def backtrack(self, assignment) -> None:
         # Remove assignment and assignments for all dependencies
-        dependencies = self.get_dependencies_assignments(assignment)
+        dependencies = self.get_dependency_assignments(assignment)
     
         for dependency in dependencies:
             self.backtrack(dependency)
@@ -324,8 +315,7 @@ class SearchState:
         if not isinstance(assignment, RootAssignment):
             self.assignments.remove(assignment)
 
-    def solution_is_complete(self) -> bool:
-
+    def is_solution_complete(self) -> bool:
         for clause in self.clauses:
             if not clause.truth_value(self.assignments):
                 return False
@@ -347,12 +337,11 @@ class SearchState:
     def get_unassigned_packages(self):
         package_names = []
         
-        for clause in self.clauses:
-            for package_name in clause.get_package_names():
-                if not self.has_assignment(package_name):
-                    package_names.append(package_name)
+        for package_name in unique_items(itertools.chain(*[clause.get_package_names() for clause in self.clauses])):
+            if not self.has_assignment(package_name):
+                package_names.append(package_name)
 
-        return list(unique_items(package_names))
+        return package_names
 
     def get_current_solution(self):
         solution = {}
@@ -387,7 +376,7 @@ def solve_dependencies(
 
     state.add_root_dependencies(*root_dependencies)
 
-    while not state.solution_is_complete():
+    while not state.is_solution_complete():
 
         if state.has_failed():
             report_error(state)
@@ -423,7 +412,9 @@ def solve_dependencies(
                 assignment_to_make = assignment_to_try
                 break
             
-            all_violated_clauses.extend(violated_clauses)
+            for clause in violated_clauses:
+                if clause not in all_violated_clauses:
+                    all_violated_clauses.append(clause)
 
 
         # Some debug printing
@@ -435,7 +426,7 @@ def solve_dependencies(
 
         if assignment_to_make is None:
             # We have a conflict
-            incompatibility = Incompatibility(package_name, unique_items(all_violated_clauses))
+            incompatibility = Incompatibility(package_name, all_violated_clauses)
 
             logger.debug(f"\tConflict: no allowed versions! Created incompatibility {incompatibility}.")
             
