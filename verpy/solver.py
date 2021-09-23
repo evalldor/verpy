@@ -382,7 +382,7 @@ def solve_dependencies(
     while not state.is_solution_complete():
 
         if state.has_failed():
-            report_error(state)
+            raise create_error(state)
 
         logger.debug("="*80)
         logger.debug(f"All assignments are: {state.assignments}")
@@ -467,7 +467,7 @@ def _simplify_term(term : Term, all_versions: typing.List[verpy.Version]) -> Ter
     pass
 
 
-def report_error(state: SearchState):
+def create_error(state: SearchState):
 
     # Find incompatibility that has only Dependencies as its cause. This is the
     # root if the conflict.
@@ -499,7 +499,7 @@ def report_error(state: SearchState):
     # print("\t" + " and \n\t".join(dependency_strings))
     # print(f"which are mutually incompatible requirements!")
 
-    raise SolverError(
+    return SolverError(
         package_name=package_name,
         conflicting_requirements=conflicting_requirements,
         root_requirements_involved=root_requirements_involved
