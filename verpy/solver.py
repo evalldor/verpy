@@ -52,6 +52,9 @@ class DictRepository(PackageRepository):
     def get_dependencies(self, package_name, package_version):
         return list(self.contents[package_name][package_version])
 
+    def parse_requirement(self, string):
+        return ver.parse_requirement(string)
+
 
 class VersionSelectionStrategy:
     
@@ -62,7 +65,19 @@ class VersionSelectionStrategy:
 class DefaultVersionSelectionStrategy(VersionSelectionStrategy):
 
     def get_prioritized_assignments(self, state, package_name):
-        return [Assignment(package_name, version) for version in sorted(state.get_versions(package_name), reverse=True)]
+        flags = state.get_all_flags_associated_with_package(package_name)
+
+        all_flag_combinations = list([set(*itertools.combinations(flags, i)) for i in range(len(flags)+1)])
+        
+        all_versions = sorted(state.get_versions(package_name), reverse=True)
+
+        list_of_assignments = []
+
+        for version in all_versions:
+            for flags in all_flag_combinations:
+                list_of_assignments.append(Assignment(package_name, version, flags))
+
+        return list_of_assignments
 
 
 class MavenVersionSelectionStrategy(VersionSelectionStrategy):
@@ -101,16 +116,20 @@ class MavenVersionSelectionStrategy(VersionSelectionStrategy):
 
 class Assignment:
 
-    def __init__(self, package_name: str, version: ver.Version, force: bool = False) -> None:
+    def __init__(self, package_name: str, version: ver.Version, flags: typing.Set[str] = [], force: bool = False) -> None:
         self.package_name = package_name
         self.version = version
+        self.flags = flags
         self.force = force
 
     def as_requirement(self):
         return ver.Requirement(self.package_name, ver.VersionSet.eq(self.version))
 
     def __str__(self) -> str:
-        return f"{self.package_name} {self.version}"
+        flags = ",".join(self.flags) if len(self.flags) > 0 else ""
+        forced = " (forced)" if self.force else ""
+
+        return f"{self.package_name}{flags} {self.version}{forced}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -151,11 +170,17 @@ class Term:
     def version_set(self) -> ver.VersionSet:
         return self.requirement.version_set
 
+    @property
+    def flags(self) -> typing.Set[str]:
+        return self.requirement.flags
+
     def truth_value(self, assignments) -> typing.Union[bool, None]:
         for assignment in assignments:
             if assignment.package_name == self.package_name:
                 if self.polarity:
-                    return assignment.force or (not isinstance(assignment, NullAssignment) and assignment.version in self.version_set)
+                    return assignment.force or (not isinstance(assignment, NullAssignment) 
+                                                and assignment.version in self.version_set 
+                                                and self.flags.issubset(assignment.flags))
                 
                 return isinstance(assignment, NullAssignment) or assignment.version not in self.version_set
         
@@ -271,7 +296,7 @@ class SearchState:
     def load_dependencies(self, assignment) -> typing.List[ver.Requirement]:
         if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
             self.loaded_dependencies.append(assignment)
-            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
+            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version, assignment.flags)
 
             for requirement in dependencies:
                 self.clauses.append(Dependency(assignment, requirement))
@@ -285,7 +310,7 @@ class SearchState:
     def get_dependant_assignments(self, package_name):
         dependants = []
         for clause in self.clauses:
-            if isinstance(clause, Dependency) and clause.dependant in self.assignments and clause.dependency.package_name == package_name:
+            if isinstance(clause, Dependency) and clause.dependency.package_name == package_name and clause.dependant in self.assignments:
                 dependants.append(clause.dependant)
         
         return dependants
@@ -329,6 +354,16 @@ class SearchState:
                     deepest = assignment
 
         return deepest
+
+    def get_all_flags_associated_with_package(self, package_name):
+        flags = set()
+
+        for clause in self.clauses:
+            for term in clause:
+                if term.package_name == package_name:
+                    flags = flags.union(term.flags)
+        
+        return flags
 
     def get_unassigned_packages(self):
         assigned_package_names = [a.package_name for a in self.assignments]

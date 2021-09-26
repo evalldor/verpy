@@ -2,6 +2,7 @@
 from pyparsing import (
     Literal,
     CaselessLiteral,
+    ParseException,
     Word, 
     Empty, 
     alphanums, 
@@ -106,7 +107,10 @@ VERSION_SET_PATTERN = ungroup(infixNotation(
 ))
 
 def parse_version_set(string):
-    return VERSION_SET_PATTERN.parseString(string, parseAll=True)[0]
+    try:
+        return VERSION_SET_PATTERN.parseString(string, parseAll=True)[0]
+    except ParseException as e:
+        raise Exception(f"Error when parsing version set: {e.line}") from e
 
 
 
@@ -115,12 +119,14 @@ def parse_version_set(string):
 #
 REQUIREMENT_NAME = Word(alphanums+".-_")
 
-REQUIREMENT_PATTERN = REQUIREMENT_NAME + VERSION_SET_PATTERN
+FLAGS = Group(Optional(Literal("[").suppress() + delimitedList(Word(alphanums+"-_")) + Literal("]").suppress()))
+
+REQUIREMENT_PATTERN = REQUIREMENT_NAME + FLAGS + VERSION_SET_PATTERN
 
 def parse_requirement(string):
-    package_name, version_set = REQUIREMENT_PATTERN.parseString(string, parseAll=True)
+    package_name, flags, version_set = REQUIREMENT_PATTERN.parseString(string, parseAll=True)
 
-    return types.Requirement(package_name, version_set, string)
+    return types.Requirement(package_name, version_set, flags, original_string=string)
 
 #
 # Maven Range parsing
@@ -149,20 +155,20 @@ def parse_maven_version_set(requirement_string):
             
             if "min_version" in res["range"]:
                 if res["range"]["include_min"]:
-                    rng.append(types.VersionSet.gteq(types.Version(res["range"]["min_version"])))
+                    rng.append(types.VersionSet.gteq(parse_version(res["range"]["min_version"])))
                 else:
-                    rng.append(types.VersionSet.gt(types.Version(res["range"]["min_version"])))
+                    rng.append(types.VersionSet.gt(parse_version(res["range"]["min_version"])))
             
             if "max_version" in res["range"]:
                 if res["range"]["include_max"]:
-                    rng.append(types.VersionSet.lteq(types.Version(res["range"]["max_version"])))
+                    rng.append(types.VersionSet.lteq(parse_version(res["range"]["max_version"])))
                 else:
-                    rng.append(types.VersionSet.lt(types.Version(res["range"]["max_version"])))
+                    rng.append(types.VersionSet.lt(parse_version(res["range"]["max_version"])))
 
             v = types.VersionSet.all(*rng)
 
         elif "version" in res:
-            v = types.VersionSet.eq(types.Version(res["version"]))
+            v = types.VersionSet.eq(parse_version(res["version"]))
 
         specifiers.append(v)
     

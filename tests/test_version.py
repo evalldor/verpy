@@ -67,13 +67,14 @@ def test_version_sets():
 
 def test_requirement():
 
-    req = version.parse_requirement("verpy >= 1.0 & < 2.0")
-    print(req)
+    req = version.parse_requirement("verpy[asd, 123s] >= 1.0 & < 2.0")
+    print(repr(req))
 
 
 def test_python_version():
     import packaging
     import packaging.requirements
+    import packaging.markers
     import os
 
     v = packaging.version.Version("2.2")    
@@ -82,10 +83,13 @@ def test_python_version():
 
     assert v in r.specifier
 
-    print(r.marker.evaluate({"extra": "hello"}))
+    print(str(r.specifier))
+    # print(r.marker.evaluate({"extra": "hello"}))
     
-    requirements = [version.Requirement(r.name, r.specifier)]
-    for e in r.extras:
-        requirements.append(version.Requirement(f"{r.name}$__extra__${e}", r.specifier))
 
-    print(requirements)
+
+
+
+    marker = packaging.markers.Marker("'e1' in extra")
+
+    print(marker.evaluate({"extra": "e1 e2"}))

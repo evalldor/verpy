@@ -9,61 +9,42 @@ from .solver import PackageRepository
 import packaging
 import packaging.requirements
 
+
+
 class PypiRepository(PackageRepository):
 
     def __init__(self) -> None:
         super().__init__()
 
-    def get_dependencies(self, package_name, package_version) -> typing.List[version.Requirement]:
+    def get_dependencies(self, package_name, package_version, flags=[]) -> typing.List[version.Requirement]:
         
-        if "$__extra__$" in package_name:
-            name, extra = package_name.split("$__extra__$")
+        info = requests.get(f"https://pypi.org/pypi/{package_name}/{package_version}/json").json()
 
-            info = requests.get(f"https://pypi.org/pypi/{name}/{package_version}/json").json()
+        
+        requires_dist = info["info"]["requires_dist"]
+        
+        requirements = []
 
-            requirements = info["requires_dist"]
+        if requires_dist is not None:
+            for string in requires_dist:
+                req = packaging.requirements.Requirement(string)
+                if req.marker is None or any(req.marker.evaluate(environment={"extra": e}) for e in flags):
+                    requirements.append(version.Requirement(req.name, version.parse_version_set(str(req.specifier)), req.extras))
 
-            normal_requirements = []
-            for requirement in requirements:
-                normal_requirements.extend(self.parse_requirement(requirement))
-
-            extra_requirements = []
-            for requirement in requirements:
-                parsed_reqs = self.parse_requirement(requirement, extra)
-                for req in parsed_reqs:
-                    if req not in normal_requirements:
-                        extra_requirements.extend(req)
-
-            return 
-        else:
-            info = requests.get(f"https://pypi.org/pypi/{package_name}/{package_version}/json").json()
-
-            requirements = info["requires_dist"]
-
-            normal_requirements = []
-            for requirement in requirements:
-                normal_requirements.extend(self.parse_requirement(requirement))
+        return requirements
             
     
     def get_versions(self, package_name):
         if "$__extra__$" in package_name:
             name, extra = package_name.split("$__extra__$")
-            
+
         info = requests.get(f"https://pypi.org/pypi/{package_name}/json").json()
 
-        return [packaging.version.Version(v) for v in info["releases"].keys()]
+        return [version.parse_version(v) for v in info["releases"].keys()]
 
 
     def parse_requirement(self, string, extra=""):
         req = packaging.requirements.Requirement(string)
         
-        if req.marker is not None:
-            if not req.marker.evaluate({"extras": extra}):
-                return []
-
-        requirements = [version.Requirement(req.name, req.specifier)]
         
-        for e in req.extras:
-            requirements.append(version.Requirement(f"{req.name}$__extra__${e}", req.specifier))
-        
-        return requirements
+        return version.Requirement(req.name, version.parse_version_set(str(req.specifier)), req.extras)

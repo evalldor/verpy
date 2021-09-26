@@ -118,7 +118,16 @@ class StringComponent:
 
 
 class NullComponent:
-    pass
+
+    def normalized_representation(self):
+        """Used when hashing"""
+        return tuple()
+
+    def __str__(self):
+        return ""
+    
+    def __repr__(self):
+        return str(self)
 
 
 GREATER = 1
@@ -224,8 +233,10 @@ def compare_component_with_null(a):
             return EQUAL #Should never happend, but just to be safe..
         
         return LESSER
+
+    return EQUAL
     
-    raise Exception("Internal Error.")
+    # raise Exception("Internal Error.")
 
 
 class VersionSet:
@@ -526,16 +537,23 @@ class NotOperator(VersionSet):
 
 class Requirement:
 
-    def __init__(self, package_name, version_set, original_string=None):
+    def __init__(self, package_name, version_set, flags=None, original_string=None):
         self.package_name = package_name
         self.version_set = version_set
+        self.flags = frozenset(flags or [])
         self.original_string = original_string
 
     def __str__(self):
         if self.original_string is not None:
             return f"{self.original_string}"
         
+        if len(self.flags) > 0:
+            return f"{self.package_name}[{','.join(self.flags)}] {self.version_set}"
+
         return f"{self.package_name} {self.version_set}"
 
     def __repr__(self):
+        if len(self.flags) > 0:
+            return f"{self.package_name}[{','.join(self.flags)}] {self.version_set}"
+
         return f"{self.package_name} {self.version_set}"

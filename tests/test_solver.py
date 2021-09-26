@@ -363,7 +363,7 @@ def test_solver_9():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            version.parse_requirement("bar >=1.0")
+            version.parse_requirement("bar[flag] >=1.0")
         ],
         package_repository=repo
     )
