@@ -1,11 +1,17 @@
 
-from .versioning import (
-    as_version as version, 
-    as_set as set, 
-    as_requirement as requirement,
-    as_maven_set as maven_set,
-    intersection_of as intersection,
-    union_of as union,
+from .parsing import (
+    parse_version,
+    parse_version_set,
+    parse_requirement,
+    
+    parse_maven_version_set,
+
+    parse_python_version,
+    parse_python_version_set,
+    parse_python_requirement
+)
+
+from .types import (
     Version,
     VersionSet,
     Requirement

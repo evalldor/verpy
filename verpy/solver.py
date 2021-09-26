@@ -4,7 +4,8 @@ import itertools
 import logging
 import typing
 
-from . import version as verpy
+from . import version as ver
+
 
 logger = logging.getLogger("solver")
 
@@ -28,10 +29,10 @@ class SolverError(Exception):
 
 class PackageRepository:
 
-    def get_versions(self, package_name) -> typing.List[verpy.Version]:
+    def get_versions(self, package_name) -> typing.List[ver.Version]:
         raise NotImplementedError()
 
-    def get_dependencies(self, package_name, package_version) -> typing.List[verpy.Requirement]:
+    def get_dependencies(self, package_name, package_version) -> typing.List[ver.Requirement]:
         raise NotImplementedError()
 
 
@@ -43,7 +44,7 @@ class DictRepository(PackageRepository):
         for pkg_name, pkg_data in contents.items():
             self.contents[pkg_name] = {}
             for version, requirements in pkg_data.items():
-                self.contents[pkg_name][verpy.version(version)] = [verpy.requirement(req) for req in requirements]
+                self.contents[pkg_name][ver.parse_version(version)] = [ver.parse_requirement(req) for req in requirements]
 
     def get_versions(self, package_name):
         return list(self.contents[package_name].keys())
@@ -100,13 +101,13 @@ class MavenVersionSelectionStrategy(VersionSelectionStrategy):
 
 class Assignment:
 
-    def __init__(self, package_name: str, version: verpy.Version, force: bool = False) -> None:
+    def __init__(self, package_name: str, version: ver.Version, force: bool = False) -> None:
         self.package_name = package_name
         self.version = version
         self.force = force
 
     def as_requirement(self):
-        return verpy.Requirement(self.package_name, verpy.VersionSet.eq(self.version))
+        return ver.Requirement(self.package_name, ver.VersionSet.eq(self.version))
 
     def __str__(self) -> str:
         return f"{self.package_name} {self.version}"
@@ -147,7 +148,7 @@ class Term:
         return self.requirement.package_name
     
     @property
-    def version_set(self) -> verpy.VersionSet:
+    def version_set(self) -> ver.VersionSet:
         return self.requirement.version_set
 
     def truth_value(self, assignments) -> typing.Union[bool, None]:
@@ -209,7 +210,7 @@ class Clause:
 
 class Dependency(Clause):
 
-    def __init__(self, dependant: Assignment, dependency: verpy.Requirement) -> None:
+    def __init__(self, dependant: Assignment, dependency: ver.Requirement) -> None:
         super().__init__([Term(dependant.as_requirement(), polarity=False), Term(dependency)])
 
         # These are stored here as shorthands to simplify dependency/dependant
@@ -246,7 +247,7 @@ class SearchState:
 
         # Caches
         self.loaded_dependencies : typing.List[Assignment] = []
-        self.available_versions : typing.Mapping[str, typing.List[verpy.Version]] = {}
+        self.available_versions : typing.Mapping[str, typing.List[ver.Version]] = {}
 
     def add_root_dependencies(self, *requirements) -> None:
         root_assignment = RootAssignment()
@@ -267,7 +268,7 @@ class SearchState:
         
         return False
 
-    def load_dependencies(self, assignment) -> typing.List[verpy.Requirement]:
+    def load_dependencies(self, assignment) -> typing.List[ver.Requirement]:
         if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
             self.loaded_dependencies.append(assignment)
             dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version)
@@ -275,7 +276,7 @@ class SearchState:
             for requirement in dependencies:
                 self.clauses.append(Dependency(assignment, requirement))
 
-    def get_versions(self, package_name) -> typing.List[verpy.Version]:
+    def get_versions(self, package_name) -> typing.List[ver.Version]:
         if package_name not in self.available_versions:
             self.available_versions[package_name] = self.repo.get_versions(package_name)
 
@@ -364,7 +365,7 @@ class SearchState:
 
 
 def solve_dependencies(
-    root_dependencies: typing.List[verpy.Requirement], 
+    root_dependencies: typing.List[ver.Requirement], 
     package_repository: PackageRepository, 
     version_selection_strategy: VersionSelectionStrategy = None
 ):
@@ -455,15 +456,15 @@ def _simplify_clause(clause : Clause) -> Clause:
 
     for pkg_name, pkg_terms in terms.items():
         if len(pkg_terms) > 1:
-            version = verpy.union(*[term.version_set for term in pkg_terms])
-            simplified_terms.append(Term(verpy.Requirement(pkg_name, version)))
+            version = ver.union(*[term.version_set for term in pkg_terms])
+            simplified_terms.append(Term(ver.Requirement(pkg_name, version)))
         else:
             simplified_terms.append(pkg_terms[0])
 
     return Clause(simplified_terms)
 
 
-def _simplify_term(term : Term, all_versions: typing.List[verpy.Version]) -> Term:
+def _simplify_term(term : Term, all_versions: typing.List[ver.Version]) -> Term:
     pass
 
 

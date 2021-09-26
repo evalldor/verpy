@@ -7,6 +7,8 @@ authors = ["E.V"]
 [tool.poetry.dependencies]
 python = "^3.9"
 requests = "^2.26.0"
+setuptools = "^58.1.0"
+packaging = "^21.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"

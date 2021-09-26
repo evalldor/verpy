@@ -1,8 +1,9 @@
-import verpy.version as vp
+import logging
+
+import pytest
 import verpy.solver as solver
 
-import logging
-import pytest
+from verpy import version
 
 logging.basicConfig(level="DEBUG")
 
@@ -33,8 +34,8 @@ def test_solver_1():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0"),
-            vp.requirement("foo >=1.0 & <2.0")
+            version.parse_requirement("bar >=1.0"),
+            version.parse_requirement("foo >=1.0 & <2.0")
         ],
         package_repository=repo
     )
@@ -69,7 +70,7 @@ def test_solver_2():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0")
+            version.parse_requirement("bar >=1.0")
         ],
         package_repository=repo
     )
@@ -114,7 +115,7 @@ def test_solver_3():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0")
+            version.parse_requirement("bar >=1.0")
         ],
         package_repository=repo
     )
@@ -156,7 +157,7 @@ def test_solver_4():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0")
+            version.parse_requirement("bar >=1.0")
         ],
         package_repository=repo
     )
@@ -189,7 +190,7 @@ def test_solver_5():
 
         result = solver.solve_dependencies(
             root_dependencies=[
-                vp.requirement("bar >=1.0")
+                version.parse_requirement("bar >=1.0")
             ],
             package_repository=repo
         )
@@ -233,8 +234,8 @@ def test_solver_6():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("c >=1.0"),
-            vp.requirement("y >=2.0")
+            version.parse_requirement("c >=1.0"),
+            version.parse_requirement("y >=2.0")
         ],
         package_repository=repo
     )
@@ -276,7 +277,7 @@ def test_solver_7():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("foo >=1.0")
+            version.parse_requirement("foo >=1.0")
         ],
         package_repository=repo
     )
@@ -321,9 +322,9 @@ def test_solver_8():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0"),
-            vp.requirement("foo >=1.0"),
-            vp.requirement("baz >=1.0")
+            version.parse_requirement("bar >=1.0"),
+            version.parse_requirement("foo >=1.0"),
+            version.parse_requirement("baz >=1.0")
         ],
         package_repository=repo
     )
@@ -362,7 +363,7 @@ def test_solver_9():
 
     result = solver.solve_dependencies(
         root_dependencies=[
-            vp.requirement("bar >=1.0")
+            version.parse_requirement("bar >=1.0")
         ],
         package_repository=repo
     )
