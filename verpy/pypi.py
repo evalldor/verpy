@@ -8,6 +8,7 @@ from .solver import PackageRepository
 
 import packaging
 import packaging.requirements
+import packaging.version
 
 
 
@@ -29,7 +30,7 @@ class PypiRepository(PackageRepository):
             for string in requires_dist:
                 req = packaging.requirements.Requirement(string)
                 if req.marker is None or any(req.marker.evaluate(environment={"extra": e}) for e in flags):
-                    requirements.append(version.Requirement(req.name, version.parse_version_set(str(req.specifier)), req.extras))
+                    requirements.append(version.Requirement(req.name, req.specifier, req.extras))
 
         return requirements
             
@@ -40,11 +41,11 @@ class PypiRepository(PackageRepository):
 
         info = requests.get(f"https://pypi.org/pypi/{package_name}/json").json()
 
-        return [version.parse_version(v) for v in info["releases"].keys()]
+        return [packaging.version.parse(v) for v in info["releases"].keys()]
 
 
     def parse_requirement(self, string, extra=""):
         req = packaging.requirements.Requirement(string)
         
         
-        return version.Requirement(req.name, version.parse_version_set(str(req.specifier)), req.extras)
+        return version.Requirement(req.name, req.specifier, req.extras)

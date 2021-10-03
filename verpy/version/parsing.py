@@ -174,10 +174,13 @@ def parse_maven_version_set(requirement_string):
     
     return types.VersionSet.any(*specifiers)
 
-#
-# Python specific
+
+
 
 #
+# Python specific
+#
+
 import pkg_resources
 
 def parse_python_version(string):

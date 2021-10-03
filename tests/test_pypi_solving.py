@@ -3,7 +3,7 @@ import logging
 from verpy import solver
 from verpy import pypi
 
-# logging.basicConfig(level="DEBUG")
+logging.basicConfig(level="DEBUG")
 
 def test_pypi_solving_1():
     repo = pypi.PypiRepository()
