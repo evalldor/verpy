@@ -32,7 +32,7 @@ class PackageRepository:
     def get_versions(self, package_name) -> typing.List[ver.Version]:
         raise NotImplementedError()
 
-    def get_dependencies(self, package_name, package_version) -> typing.List[ver.Requirement]:
+    def get_dependencies(self, package_name, package_version, flags=[]) -> typing.List[ver.Requirement]:
         raise NotImplementedError()
 
 
@@ -49,7 +49,7 @@ class DictRepository(PackageRepository):
     def get_versions(self, package_name):
         return list(self.contents[package_name].keys())
 
-    def get_dependencies(self, package_name, package_version):
+    def get_dependencies(self, package_name, package_version, flags=[]):
         return list(self.contents[package_name][package_version])
 
     def parse_requirement(self, string):
@@ -58,31 +58,35 @@ class DictRepository(PackageRepository):
 
 class VersionSelectionStrategy:
     
-    def get_prioritized_assignments(self, state, package_name):
+    def get_assignments(self, state, package_name):
         raise NotImplementedError()
 
 
 class DefaultVersionSelectionStrategy(VersionSelectionStrategy):
 
-    def get_prioritized_assignments(self, state, package_name):
+    def get_assignments(self, state, package_name):
+        # Try assigning a version to the package and see if that violates any
+        # clauses. If if does, we move on to the next version etc. The order
+        # that the versions are tried is determined by the version_selection_strategy
+
         flags = state.get_all_flags_associated_with_package(package_name)
 
         all_flag_combinations = list([set(*itertools.combinations(flags, i)) for i in range(len(flags)+1)])
         
         all_versions = sorted(state.get_versions(package_name), reverse=True)
 
-        list_of_assignments = []
+        assignments_to_try = [NullAssignment(package_name)]
 
         for version in all_versions:
             for flags in all_flag_combinations:
-                list_of_assignments.append(Assignment(package_name, version, flags))
+                assignments_to_try.append(Assignment(package_name, version, flags))
 
-        return list_of_assignments
+        return assignments_to_try
 
 
 class MavenVersionSelectionStrategy(VersionSelectionStrategy):
 
-    def get_prioritized_assignments(self, state, package_name):
+    def get_assignments(self, state, package_name):
         # Chooses the highest version allowed by the requirement found closest
         # to root
 
@@ -126,7 +130,7 @@ class Assignment:
         return ver.Requirement(self.package_name, ver.VersionSet.eq(self.version))
 
     def __str__(self) -> str:
-        flags = ",".join(self.flags) if len(self.flags) > 0 else ""
+        flags = "[" + ",".join(self.flags) + "]" if len(self.flags) > 0 else ""
         forced = " (forced)" if self.force else ""
 
         return f"{self.package_name}{flags} {self.version}{forced}"
@@ -205,6 +209,7 @@ class Clause:
         self.terms = terms
 
     def truth_value(self, assignments) -> typing.Union[bool, None]:
+        has_undecided = False
         for term in self.terms:
             truth_value = term.truth_value(assignments)
             
@@ -212,9 +217,9 @@ class Clause:
                 return True
 
             if truth_value is None:
-                return None
+                has_undecided = True
 
-        return False
+        return None if has_undecided else False
 
     def get_package_names(self) -> typing.List[str]:
         return list(unique_items([term.package_name for term in self.terms]))
@@ -301,6 +306,9 @@ class SearchState:
             for requirement in dependencies:
                 self.clauses.append(Dependency(assignment, requirement))
 
+    def has_loaded_dependencies(self, assignment):
+        return assignment in self.loaded_dependencies
+
     def get_versions(self, package_name) -> typing.List[ver.Version]:
         if package_name not in self.available_versions:
             self.available_versions[package_name] = self.repo.get_versions(package_name)
@@ -366,7 +374,7 @@ class SearchState:
         return flags
 
     def get_unassigned_packages(self):
-        assigned_package_names = [a.package_name for a in self.assignments]
+        assigned_package_names = set([a.package_name for a in self.assignments])
         unassigned_package_names = []
         
         for package_name in unique_items(itertools.chain(*[clause.get_package_names() for clause in self.clauses])):
@@ -374,7 +382,7 @@ class SearchState:
                 unassigned_package_names.append(package_name)
 
         return unassigned_package_names
-
+    
     def get_current_solution(self):
         solution = {}
 
@@ -385,6 +393,9 @@ class SearchState:
         return solution
     
     def is_solution_complete(self) -> bool:
+        if len(self.get_unassigned_packages()) > 0:
+            return False
+
         for clause in self.clauses:
             if not clause.truth_value(self.assignments):
                 return False
@@ -402,14 +413,11 @@ class SearchState:
 def solve_dependencies(
     root_dependencies: typing.List[ver.Requirement], 
     package_repository: PackageRepository, 
-    version_selection_strategy: VersionSelectionStrategy = None
+    version_selection_strategy: VersionSelectionStrategy = DefaultVersionSelectionStrategy()
 ):
 
     # TODO: 
     # * Error reporting
-
-    if version_selection_strategy is None:
-        version_selection_strategy = DefaultVersionSelectionStrategy()
 
     state = SearchState(package_repository)
 
@@ -432,24 +440,29 @@ def solve_dependencies(
         all_versions = state.get_versions(package_name)
         logger.debug(f"\tAvailable versions are: {all_versions}:")
 
-        # Try assigning a version to the package and see if that violates any
-        # clauses. If if does, we move on to the next version etc. The order
-        # that the versions are tried is determined by the version_selection_strategy
-
-        all_violated_clauses = []
+        
+        # Choosing which assignment to make includes heuristics which may be
+        # implemented by users.
         assignment_to_make = None
+        all_violated_clauses = []
 
-        for assignment_to_try in [NullAssignment(package_name), *version_selection_strategy.get_prioritized_assignments(state, package_name)]:
-            
-            state.load_dependencies(assignment_to_try)
-    
+        for assignment_to_try in [NullAssignment(package_name), *version_selection_strategy.get_assignments(state, package_name)]:
+
             assignments = [assignment_to_try] + state.assignments
 
+            # First check without loading dependencies
             violated_clauses = [clause for clause in state.clauses if clause.truth_value(assignments) is False]
-            
+
             if len(violated_clauses) == 0:
-                assignment_to_make = assignment_to_try
-                break
+                # Only if the first check succeedes do we load the dependencies
+                # (Since its a costly operations) 
+                if not state.has_loaded_dependencies(assignment_to_try):
+                    state.load_dependencies(assignment_to_try)
+                    violated_clauses = [clause for clause in state.clauses if clause.truth_value(assignments) is False]
+                
+                if len(violated_clauses) == 0:
+                    assignment_to_make = assignment_to_try
+                    break
             
             for clause in violated_clauses:
                 if clause not in all_violated_clauses:
@@ -474,7 +487,7 @@ def solve_dependencies(
             state.backtrack(state.get_deepest_assignment_involving(incompatibility.get_package_names()))
 
         else:
-            logger.debug(f"\tAssigning version {assignment_to_make.version} to {package_name}.")
+            logger.debug(f"\tMaking assignment {assignment_to_make}.")
             state.add_assignment(assignment_to_make)
 
 

@@ -5,11 +5,9 @@ import requests
 from . import version
 from .solver import PackageRepository
 
-
 import packaging
 import packaging.requirements
 import packaging.version
-
 
 
 class PypiRepository(PackageRepository):
@@ -20,7 +18,6 @@ class PypiRepository(PackageRepository):
     def get_dependencies(self, package_name, package_version, flags=[]) -> typing.List[version.Requirement]:
         
         info = requests.get(f"https://pypi.org/pypi/{package_name}/{package_version}/json").json()
-
         
         requires_dist = info["info"]["requires_dist"]
         
@@ -36,9 +33,6 @@ class PypiRepository(PackageRepository):
             
     
     def get_versions(self, package_name):
-        if "$__extra__$" in package_name:
-            name, extra = package_name.split("$__extra__$")
-
         info = requests.get(f"https://pypi.org/pypi/{package_name}/json").json()
 
         return [packaging.version.parse(v) for v in info["releases"].keys()]
@@ -46,6 +40,5 @@ class PypiRepository(PackageRepository):
 
     def parse_requirement(self, string, extra=""):
         req = packaging.requirements.Requirement(string)
-        
         
         return version.Requirement(req.name, req.specifier, req.extras)
