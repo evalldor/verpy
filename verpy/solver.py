@@ -123,7 +123,7 @@ class Assignment:
     def __init__(self, package_name: str, version: ver.Version, flags: typing.Set[str] = [], force: bool = False) -> None:
         self.package_name = package_name
         self.version = version
-        self.flags = flags
+        self.flags = frozenset(flags)
         self.force = force
 
     def as_requirement(self):
@@ -139,7 +139,7 @@ class Assignment:
         return str(self)
     
     def __hash__(self) -> int:
-        return hash(("Assignment", self.package_name, self.version))
+        return hash(("Assignment", self.package_name, self.version, self.flags))
 
     def __eq__(self, other) -> bool:
         return hash(self) == hash(other)
@@ -154,7 +154,7 @@ class NullAssignment(Assignment):
 class RootAssignment(Assignment):
 
     def __init__(self) -> None:
-        super().__init__("__root__", "1.0")
+        super().__init__("__root__", "1")
 
 
 class Term:
@@ -289,14 +289,6 @@ class SearchState:
 
     def add_assignment(self, assignment) -> None:
         self.assignments.append(assignment)
-        self.load_dependencies(assignment)
-
-    def has_assignment(self, package_name) -> bool:
-        for assignment in self.assignments:
-            if assignment.package_name == package_name:
-                return True
-        
-        return False
 
     def load_dependencies(self, assignment) -> typing.List[ver.Requirement]:
         if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
@@ -418,6 +410,12 @@ def solve_dependencies(
 
     # TODO: 
     # * Error reporting
+    # * Dependency graph?
+    # * Package requirement + Environment requirements? (os, arch, etc.)
+    #   - Conditional requirements, Condition Terms
+    #   - Dependency clauses also contains conditions
+    # * How to use together with lockfiles
+    # * Rename flags -> features
 
     state = SearchState(package_repository)
 
@@ -446,7 +444,7 @@ def solve_dependencies(
         assignment_to_make = None
         all_violated_clauses = []
 
-        for assignment_to_try in [NullAssignment(package_name), *version_selection_strategy.get_assignments(state, package_name)]:
+        for assignment_to_try in version_selection_strategy.get_assignments(state, package_name):
 
             assignments = [assignment_to_try] + state.assignments
 
@@ -460,7 +458,10 @@ def solve_dependencies(
                     state.load_dependencies(assignment_to_try)
                     violated_clauses = [clause for clause in state.clauses if clause.truth_value(assignments) is False]
                 
-                if len(violated_clauses) == 0:
+                    if len(violated_clauses) == 0:
+                        assignment_to_make = assignment_to_try
+                        break
+                else:
                     assignment_to_make = assignment_to_try
                     break
             

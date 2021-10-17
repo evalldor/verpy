@@ -1,4 +1,5 @@
 import typing
+import functools
 
 import requests
 
@@ -14,10 +15,15 @@ class PypiRepository(PackageRepository):
 
     def __init__(self) -> None:
         super().__init__()
+        self._cache = {}
+
+    @functools.lru_cache(maxsize=1000)
+    def _get(self, url):
+        return requests.get(url).json()
 
     def get_dependencies(self, package_name, package_version, flags=[]) -> typing.List[version.Requirement]:
         
-        info = requests.get(f"https://pypi.org/pypi/{package_name}/{package_version}/json").json()
+        info = self._get(f"https://pypi.org/pypi/{package_name}/{package_version}/json")
         
         requires_dist = info["info"]["requires_dist"]
         
@@ -33,12 +39,12 @@ class PypiRepository(PackageRepository):
             
     
     def get_versions(self, package_name):
-        info = requests.get(f"https://pypi.org/pypi/{package_name}/json").json()
+        info = self._get(f"https://pypi.org/pypi/{package_name}/json")
 
         return [packaging.version.parse(v) for v in info["releases"].keys()]
 
 
-    def parse_requirement(self, string, extra=""):
+    def parse_requirement(self, string):
         req = packaging.requirements.Requirement(string)
         
         return version.Requirement(req.name, req.specifier, req.extras)
