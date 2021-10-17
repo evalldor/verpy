@@ -439,8 +439,7 @@ def solve_dependencies(
         logger.debug(f"\tAvailable versions are: {all_versions}:")
 
         
-        # Choosing which assignment to make includes heuristics which may be
-        # implemented by users.
+        # Decide which version to assign to the package
         assignment_to_make = None
         all_violated_clauses = []
 
