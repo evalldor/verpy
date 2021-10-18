@@ -537,23 +537,23 @@ class NotOperator(VersionSet):
 
 class Requirement:
 
-    def __init__(self, package_name, version_set, flags=None, original_string=None):
+    def __init__(self, package_name, version_set, features=None, original_string=None):
         self.package_name = package_name
         self.version_set = version_set
-        self.flags = frozenset(flags or [])
+        self.features = frozenset(features or [])
         self.original_string = original_string
 
     def __str__(self):
         if self.original_string is not None:
             return f"{self.original_string}"
         
-        if len(self.flags) > 0:
-            return f"{self.package_name}[{','.join(self.flags)}] {self.version_set}"
+        if len(self.features) > 0:
+            return f"{self.package_name}[{','.join(self.features)}] {self.version_set}"
 
         return f"{self.package_name} {self.version_set}"
 
     def __repr__(self):
-        if len(self.flags) > 0:
-            return f"{self.package_name}[{','.join(self.flags)}] {self.version_set}"
+        if len(self.features) > 0:
+            return f"{self.package_name}[{','.join(self.features)}] {self.version_set}"
 
         return f"{self.package_name} {self.version_set}"

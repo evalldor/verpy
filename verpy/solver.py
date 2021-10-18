@@ -32,7 +32,7 @@ class PackageRepository:
     def get_versions(self, package_name) -> typing.List[ver.Version]:
         raise NotImplementedError()
 
-    def get_dependencies(self, package_name, package_version, flags=[]) -> typing.List[ver.Requirement]:
+    def get_dependencies(self, package_name, package_version, features=[]) -> typing.List[ver.Requirement]:
         raise NotImplementedError()
 
 
@@ -49,7 +49,7 @@ class DictRepository(PackageRepository):
     def get_versions(self, package_name):
         return list(self.contents[package_name].keys())
 
-    def get_dependencies(self, package_name, package_version, flags=[]):
+    def get_dependencies(self, package_name, package_version, features=[]):
         return list(self.contents[package_name][package_version])
 
     def parse_requirement(self, string):
@@ -69,17 +69,17 @@ class DefaultVersionSelectionStrategy(VersionSelectionStrategy):
         # clauses. If if does, we move on to the next version etc. The order
         # that the versions are tried is determined by the version_selection_strategy
 
-        flags = state.get_all_flags_associated_with_package(package_name)
+        features = state.get_all_features_associated_with_package(package_name)
 
-        all_flag_combinations = list([set(*itertools.combinations(flags, i)) for i in range(len(flags)+1)])
+        all_flag_combinations = list([set(*itertools.combinations(features, i)) for i in range(len(features)+1)])
         
         all_versions = sorted(state.get_versions(package_name), reverse=True)
 
         assignments_to_try = [NullAssignment(package_name)]
 
         for version in all_versions:
-            for flags in all_flag_combinations:
-                assignments_to_try.append(Assignment(package_name, version, flags))
+            for features in all_flag_combinations:
+                assignments_to_try.append(Assignment(package_name, version, features))
 
         return assignments_to_try
 
@@ -120,26 +120,26 @@ class MavenVersionSelectionStrategy(VersionSelectionStrategy):
 
 class Assignment:
 
-    def __init__(self, package_name: str, version: ver.Version, flags: typing.Set[str] = [], force: bool = False) -> None:
+    def __init__(self, package_name: str, version: ver.Version, features: typing.Set[str] = [], force: bool = False) -> None:
         self.package_name = package_name
         self.version = version
-        self.flags = frozenset(flags)
+        self.features = frozenset(features)
         self.force = force
 
     def as_requirement(self):
         return ver.Requirement(self.package_name, ver.VersionSet.eq(self.version))
 
     def __str__(self) -> str:
-        flags = "[" + ",".join(self.flags) + "]" if len(self.flags) > 0 else ""
+        features = "[" + ",".join(self.features) + "]" if len(self.features) > 0 else ""
         forced = " (forced)" if self.force else ""
 
-        return f"{self.package_name}{flags} {self.version}{forced}"
+        return f"{self.package_name}{features} {self.version}{forced}"
 
     def __repr__(self) -> str:
         return str(self)
     
     def __hash__(self) -> int:
-        return hash(("Assignment", self.package_name, self.version, self.flags))
+        return hash(("Assignment", self.package_name, self.version, self.features))
 
     def __eq__(self, other) -> bool:
         return hash(self) == hash(other)
@@ -175,8 +175,8 @@ class Term:
         return self.requirement.version_set
 
     @property
-    def flags(self) -> typing.Set[str]:
-        return self.requirement.flags
+    def features(self) -> typing.Set[str]:
+        return self.requirement.features
 
     def truth_value(self, assignments) -> typing.Union[bool, None]:
         for assignment in assignments:
@@ -184,7 +184,7 @@ class Term:
                 if self.polarity:
                     return assignment.force or (not isinstance(assignment, NullAssignment) 
                                                 and assignment.version in self.version_set 
-                                                and self.flags.issubset(assignment.flags))
+                                                and self.features.issubset(assignment.features))
                 
                 return isinstance(assignment, NullAssignment) or assignment.version not in self.version_set
         
@@ -293,7 +293,7 @@ class SearchState:
     def load_dependencies(self, assignment) -> typing.List[ver.Requirement]:
         if not isinstance(assignment, NullAssignment) and assignment not in self.loaded_dependencies:
             self.loaded_dependencies.append(assignment)
-            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version, assignment.flags)
+            dependencies = self.repo.get_dependencies(assignment.package_name, assignment.version, assignment.features)
 
             for requirement in dependencies:
                 self.clauses.append(Dependency(assignment, requirement))
@@ -355,15 +355,15 @@ class SearchState:
 
         return deepest
 
-    def get_all_flags_associated_with_package(self, package_name):
-        flags = set()
+    def get_all_features_associated_with_package(self, package_name):
+        features = set()
 
         for clause in self.clauses:
             for term in clause:
                 if term.package_name == package_name:
-                    flags = flags.union(term.flags)
+                    features = features.union(term.features)
         
-        return flags
+        return features
 
     def get_unassigned_packages(self):
         assigned_package_names = set([a.package_name for a in self.assignments])
@@ -415,7 +415,7 @@ def solve_dependencies(
     #   - Conditional requirements, Condition Terms
     #   - Dependency clauses also contains conditions
     # * How to use together with lockfiles
-    # * Rename flags -> features
+    # * Rename features -> features
 
     state = SearchState(package_repository)
 
